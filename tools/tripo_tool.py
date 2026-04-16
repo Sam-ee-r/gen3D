@@ -16,7 +16,7 @@ def _curl(method, url, headers=None, files=None, json_data=None, output_file=Non
     curl is used instead of requests because Python's SSL on macOS
     produces SSLEOFError against api.tripo3d.ai, while curl works fine.
     """
-    cmd = ['curl', '-s', '-k', '-L', '-X', method]  # -L follows redirects
+    cmd = ['curl', '-s', '-k', '-L', '-X', method, '--max-time', '120']  # -L follows redirects
 
     if headers:
         for key, value in headers.items():
@@ -37,13 +37,17 @@ def _curl(method, url, headers=None, files=None, json_data=None, output_file=Non
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"curl failed: {result.stderr}")
+        raise RuntimeError(f"curl failed (exit {result.returncode}): {result.stderr or result.stdout or 'no output'}")
 
     if output_file:
         return None
     if result.stdout:
         try:
-            return json.loads(result.stdout)
+            parsed = json.loads(result.stdout)
+            # Surface API-level errors clearly
+            if isinstance(parsed, dict) and parsed.get("code") and parsed.get("code") != 0:
+                raise RuntimeError(f"API error {parsed.get('code')}: {parsed.get('message', result.stdout[:200])}")
+            return parsed
         except json.JSONDecodeError:
             raise RuntimeError(f"Non-JSON response: {result.stdout[:300]}")
     return {}
@@ -94,47 +98,6 @@ def smart_refine_geometry(file_path):
     return refined_path
 
 
-@tool("generate_3d_model")
-def generate_3d_model(image_path: str):
-    """
-    USE THIS TOOL FIRST. Generates a 3D model from a local image path.
-    Input must be a string representing the path (e.g., './input.jpg').
-    This tool will return the path to the REFINED 3D mesh.
-    """
-    api_key = os.getenv("TRIPO_API_KEY")
-    if not api_key:
-        return "Error: TRIPO_API_KEY not found in environment."
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    # 1. Upload the image via curl (bypasses Python SSL issues on macOS)
-    upload_url = "https://api.tripo3d.ai/v2/openapi/upload"
-    try:
-        resp = _curl("POST", upload_url, headers=headers, files={"file": image_path})
-        image_token = resp["data"]["image_token"]
-    except Exception as e:
-        return f"Upload error: {str(e)}"
-
-    # 2. Task Creation (v2 payload format)
-    task_url = "https://api.tripo3d.ai/v2/openapi/task"
-    task_payload = {
-        "type": "image_to_model",
-        "file": {
-            "type": "jpg",
-            "file_token": image_token
-        }
-    }
-    try:
-        task_resp = _curl("POST", task_url, headers=headers, json_data=task_payload)
-        
-        # Check if the API returned an explicit error (like insufficient credits)
-        if "data" not in task_resp:
-            return f"Tripo API Error: {task_resp.get('message', 'Unknown error')} (Code: {task_resp.get('code')})"
-            
-        task_id = task_resp["data"]["task_id"]
-    except Exception as e:
-        return f"Task creation error: {str(e)}"
-
 def _poll_and_download(task_id: str, headers: dict, label: str = "model") -> str:
     """Polls Tripo until the task completes, then downloads and refines the mesh."""
     print(f"🔄 Processing 3D Model (Task ID: {task_id})...")
@@ -171,10 +134,8 @@ def _poll_and_download(task_id: str, headers: dict, label: str = "model") -> str
     if not model_url:
         return "Error: Timed out waiting for Tripo AI."
 
-    # Build a human-readable folder: timestamp + object label
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    folder_name = f"{timestamp}_{label}"
-    output_dir = os.path.join("./outputs", folder_name)
+    # Extract job_id or filename from the image path (assuming inputs/uuid.jpg or similar)
+    output_dir = os.path.join("./outputs", str(label))
     os.makedirs(output_dir, exist_ok=True)
     ext = os.path.splitext(model_url.split("?")[0])[-1] or ".glb"
     raw_file_path = os.path.join(output_dir, f"raw{ext}")
@@ -186,7 +147,7 @@ def _poll_and_download(task_id: str, headers: dict, label: str = "model") -> str
 
     print("✨ Applying Smart CAD Refinement...")
     final_path = smart_refine_geometry(raw_file_path)
-    return f"Success: Refined model saved at {final_path}"
+    return f"Success: Raw model saved at {raw_file_path} | Refined model saved at {final_path}"
 
 
 @tool("generate_3d_model")
@@ -224,7 +185,10 @@ def generate_3d_model(image_path: str):
     except Exception as e:
         return f"Task creation error: {str(e)}"
 
-    return _poll_and_download(task_id, headers, label="image-model")
+    # Extract the job_id from image_path (e.g. ./inputs/uuid.jpg -> uuid)
+    basename = os.path.basename(image_path)
+    job_id = os.path.splitext(basename)[0]
+    return _poll_and_download(task_id, headers, label=job_id)
 
 
 @tool("generate_3d_from_text")
