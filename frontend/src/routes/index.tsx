@@ -37,9 +37,9 @@ function Index() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <AppHeader onReset={handleReset} showReset={stage !== "input"} />
-      <main className="pt-14">
+      <main className="pt-12">
         <AnimatePresence mode="wait">
           {stage === "input" && (
             <motion.div
