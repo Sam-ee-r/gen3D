@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+outputs/
+.DS_Store
+Hackathon\ Practice.code-workspace
