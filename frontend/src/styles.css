@@ -50,63 +50,95 @@
   --color-tech-muted: var(--tech-muted);
   --color-tech-border: var(--tech-border);
 
-  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 :root {
   --radius: 0.75rem;
-  /* Precision Lab: Light stone base */
-  --background: oklch(0.97 0.005 80);
-  --foreground: oklch(0.18 0.02 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 260);
-  /* Teal primary */
-  --primary: oklch(0.60 0.15 180);
-  --primary-foreground: oklch(1 0 0);
-  /* Amber secondary */
-  --secondary: oklch(0.78 0.16 80);
-  --secondary-foreground: oklch(0.25 0.04 80);
-  --muted: oklch(0.94 0.01 80);
-  --muted-foreground: oklch(0.50 0.02 260);
-  --accent: oklch(0.94 0.01 80);
-  --accent-foreground: oklch(0.18 0.02 260);
+  /* Cyber Forge: Deep obsidian base */
+  --background: oklch(0.16 0.0 0);
+  --foreground: oklch(0.98 0.0 0);
+  --card: oklch(0.18 0.0 0);
+  --card-foreground: oklch(0.98 0.0 0);
+  --popover: oklch(0.18 0.0 0);
+  --popover-foreground: oklch(0.98 0.0 0);
+  /* Neon Amber primary */
+  --primary: oklch(0.72 0.18 50);
+  --primary-foreground: oklch(0.15 0.0 0);
+  /* Secondary / Muted */
+  --secondary: oklch(0.25 0.0 0);
+  --secondary-foreground: oklch(0.98 0.0 0);
+  --muted: oklch(0.25 0.0 0);
+  --muted-foreground: oklch(0.65 0.0 0);
+  --accent: oklch(0.25 0.0 0);
+  --accent-foreground: oklch(0.98 0.0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.90 0.01 80);
-  --input: oklch(0.90 0.01 80);
-  --ring: oklch(0.60 0.15 180);
-  --chart-1: oklch(0.60 0.15 180);
+  --border: oklch(0.28 0.0 0);
+  --input: oklch(0.28 0.0 0);
+  --ring: oklch(0.72 0.18 50);
+  
+  /* Chart Colors */
+  --chart-1: oklch(0.72 0.18 50);
   --chart-2: oklch(0.78 0.16 80);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  /* Tech containers (dark) */
-  --tech-bg: oklch(0.13 0.02 260);
-  --tech-fg: oklch(0.78 0.02 260);
-  --tech-muted: oklch(0.45 0.02 260);
-  --tech-border: oklch(0.25 0.02 260);
+
+  /* Tech containers (For 3D Viewers) */
+  --tech-bg: oklch(0.14 0.0 0);
+  --tech-fg: oklch(0.85 0.0 0);
+  --tech-muted: oklch(0.55 0.0 0);
+  --tech-border: oklch(0.25 0.0 0);
+
   /* Sidebar */
-  --sidebar: oklch(0.97 0.005 80);
-  --sidebar-foreground: oklch(0.18 0.02 260);
-  --sidebar-primary: oklch(0.60 0.15 180);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.94 0.01 80);
-  --sidebar-accent-foreground: oklch(0.18 0.02 260);
-  --sidebar-border: oklch(0.90 0.01 80);
-  --sidebar-ring: oklch(0.60 0.15 180);
+  --sidebar: oklch(0.18 0.0 0);
+  --sidebar-foreground: oklch(0.98 0.0 0);
+  --sidebar-primary: oklch(0.72 0.18 50);
+  --sidebar-primary-foreground: oklch(0.15 0.0 0);
+  --sidebar-accent: oklch(0.25 0.0 0);
+  --sidebar-accent-foreground: oklch(0.98 0.0 0);
+  --sidebar-border: oklch(0.28 0.0 0);
+  --sidebar-ring: oklch(0.72 0.18 50);
+  
+  --primary-rgb: 255, 145, 0; /* Fallback for rgb/rgba usage */
 }
 
 @layer base {
   * {
     border-color: var(--color-border);
   }
-  body {
+  html {
+    /* Dark base sits on the document root so the Three.js canvas (z:-1 fixed)
+       renders above this and below body content */
     background-color: var(--color-background);
+  }
+  body {
+    background-color: transparent; /* Let DottedSurface canvas show through */
     color: var(--color-foreground);
     font-family: var(--font-display);
+  }
+  
+  /* Global Interactive Cursors */
+  button, 
+  [role="button"], 
+  a, 
+  select, 
+  .cursor-pointer,
+  input[type="submit"], 
+  input[type="button"], 
+  input[type="checkbox"], 
+  input[type="radio"] {
+    cursor: pointer;
+  }
+  
+  button:disabled, 
+  [role="button"]:disabled, 
+  [aria-disabled="true"],
+  .disabled {
+    cursor: not-allowed;
+    pointer-events: auto; /* Allow hovering to see the not-allowed cursor */
   }
 }
 

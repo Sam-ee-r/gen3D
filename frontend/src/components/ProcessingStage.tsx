@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Progress } from "@/components/ui/progress";
 
 const FALLBACK_STEPS = [
@@ -17,6 +17,29 @@ interface ProcessingStageProps {
 export function ProcessingStage({ jobId, onComplete }: ProcessingStageProps) {
   const [progress, setProgress] = useState(0);
   const [step, setStep] = useState(FALLBACK_STEPS[0]);
+  const [logs, setLogs] = useState<string[]>([
+    "[SYS] Initialization Sequence Started...",
+    `> ${FALLBACK_STEPS[0]}`,
+  ]);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll the terminal to the bottom
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
+  // Append new steps to the log
+  useEffect(() => {
+    if (!step.startsWith("Error:")) {
+      setLogs((prev) => {
+        const lastLog = prev[prev.length - 1];
+        if (lastLog === `> ${step}`) return prev;
+        return [...prev, `[${new Date().toISOString().substring(11, 19)}] Process active`, `> ${step}`];
+      });
+    } else {
+      setLogs((prev) => [...prev, `[FAIL] ${step}`]);
+    }
+  }, [step]);
 
   useEffect(() => {
     // Slow-advancing fake progress that approaches 95% but never reaches it
@@ -62,7 +85,7 @@ export function ProcessingStage({ jobId, onComplete }: ProcessingStageProps) {
   }, [jobId, onComplete]);
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] flex flex-col items-center justify-center px-6">
+    <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center px-6">
       {/* Wireframe cube */}
       <div className="relative mb-12">
         <div className="w-28 h-28 animate-glow-pulse rounded-2xl flex items-center justify-center">
@@ -74,9 +97,21 @@ export function ProcessingStage({ jobId, onComplete }: ProcessingStageProps) {
       </div>
 
       <div className="max-w-md w-full space-y-6">
-        <Progress value={progress} className="h-2 bg-muted [&>div]:bg-primary" />
+        <Progress value={progress} className="h-2 bg-muted/50 [&>div]:bg-primary overflow-hidden shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)]" />
+        
+        {/* Animated Terminal Log */}
+        <div className="bg-tech-bg border border-tech-border rounded-xl p-4 h-36 overflow-y-auto font-mono text-xs text-tech-muted shadow-inner backdrop-blur-md">
+          {logs.map((log, i) => (
+            <div key={i} className={`mb-1.5 ${log.startsWith("[FAIL]") ? "text-red-400" : log.startsWith(">") ? "text-tech-fg" : ""}`}>
+              {log}
+            </div>
+          ))}
+          <div className="animate-pulse inline-block w-2 h-3.5 bg-primary ml-1 align-middle opacity-80" />
+          <div ref={logsEndRef} />
+        </div>
+
         <div className="text-center space-y-2">
-          <p className="text-sm font-mono font-medium text-primary">{step}</p>
+          <p className="text-sm font-mono font-medium text-primary animate-pulse">{step}</p>
           <p className="text-xs text-muted-foreground">{Math.round(progress)}% complete</p>
         </div>
       </div>

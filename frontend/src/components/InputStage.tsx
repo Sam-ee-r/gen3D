@@ -69,7 +69,7 @@ export function InputStage({ onGenerate }: InputStageProps) {
   };
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] flex flex-col items-center justify-center px-6">
+    <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center px-6">
       <div className="max-w-2xl w-full text-center mb-10">
         <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-foreground leading-tight">
           Generate Production-Ready
@@ -81,20 +81,22 @@ export function InputStage({ onGenerate }: InputStageProps) {
         </p>
       </div>
 
-      <Card className="max-w-xl w-full p-0 overflow-hidden shadow-xl border-border/60">
+      <Card className="max-w-xl w-full p-0 overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.5)] bg-card/60 backdrop-blur-xl border border-white/10">
         {/* Tabs */}
-        <div className="flex border-b border-border">
+        <div className="flex border-b border-border/50">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-all duration-300 ${
                 activeTab === tab.id
-                  ? "text-primary border-b-2 border-primary bg-primary/5"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "text-primary border-b-2 border-primary bg-primary/5 shadow-[inset_0_-2px_10px_rgba(96,23,180,0.03)]"
+                  : "text-muted-foreground hover:text-foreground hover:bg-black/5"
               }`}
             >
-              {tab.icon}
+              <div className={activeTab === tab.id ? "scale-110 transition-transform duration-300" : ""}>
+                {tab.icon}
+              </div>
               <span className="hidden sm:inline">{tab.label}</span>
             </button>
           ))}
@@ -107,8 +109,11 @@ export function InputStage({ onGenerate }: InputStageProps) {
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-border rounded-xl p-10 text-center hover:border-primary/50 transition-colors cursor-pointer"
+              className="group relative border-2 border-dashed border-border rounded-xl p-10 text-center hover:border-primary transition-all duration-500 cursor-pointer overflow-hidden backdrop-blur-sm"
             >
+              {/* Glowing hover background */}
+              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              
               <input
                 ref={fileInputRef}
                 type="file"
@@ -117,18 +122,27 @@ export function InputStage({ onGenerate }: InputStageProps) {
                 onChange={handleFileChange}
               />
               {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Preview"
-                  className="mx-auto max-h-40 rounded-lg object-contain mb-3"
-                />
+                <div className="relative z-10 animate-in fade-in zoom-in duration-300">
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    className="mx-auto max-h-48 rounded-lg object-contain mb-3 shadow-lg"
+                  />
+                  <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded-lg"></div>
+                </div>
               ) : (
-                <Upload className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+                <div className="relative z-10 flex flex-col items-center">
+                  <div className="w-16 h-16 rounded-2xl bg-tech-bg border border-tech-border flex items-center justify-center mb-4 shadow-lg group-hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.2)] transition-shadow duration-500">
+                    <Upload className="w-8 h-8 text-primary group-hover:-translate-y-1 group-hover:scale-110 transition-transform duration-500" />
+                  </div>
+                </div>
               )}
-              <p className="text-sm font-medium text-foreground">
-                {selectedFile ? selectedFile.name : "Drop your image here or click to browse"}
+              <p className="relative z-10 text-sm font-semibold text-foreground group-hover:text-primary transition-colors duration-300">
+                {selectedFile ? selectedFile.name : "Drop your structural image here"}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">PNG, JPG up to 10MB</p>
+              <p className="relative z-10 text-xs text-muted-foreground mt-1.5 font-mono">
+                Supports PNG, JPG (Max 10MB)
+              </p>
             </div>
           )}
 

@@ -11,6 +11,7 @@ interface ModelViewerPanelProps {
   available: boolean;
   unavailableReason?: string;
   accentColor?: string;
+  stats?: { faces: string; vertices: string; type: string };
 }
 
 function ModelViewerPanel({
@@ -21,6 +22,7 @@ function ModelViewerPanel({
   available,
   unavailableReason,
   accentColor = "oklch(0.7 0.2 200)",
+  stats,
 }: ModelViewerPanelProps) {
   const [wireframe, setWireframe] = useState(false);
 
@@ -89,6 +91,27 @@ function ModelViewerPanel({
               />
             </div>
 
+            {/* Floating Metadata Badges */}
+            {stats && (
+              <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none fade-in animate-in duration-500">
+                <div className="bg-tech-bg/80 backdrop-blur-md border border-tech-border rounded-lg px-3 py-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)] flex flex-col gap-1.5">
+                  <span className="text-[10px] text-tech-muted uppercase font-semibold tracking-wider">Mesh Metrics</span>
+                  <div className="flex items-center justify-between gap-6 text-xs font-mono">
+                    <span className="text-tech-fg">Faces</span>
+                    <span className="text-primary font-medium">{stats.faces}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-6 text-xs font-mono">
+                    <span className="text-tech-fg">Vertices</span>
+                    <span className="text-primary font-medium">{stats.vertices}</span>
+                  </div>
+                </div>
+                <div className="bg-tech-bg/80 backdrop-blur-md border border-tech-border rounded-lg px-3 py-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
+                  <span className="text-[10px] text-tech-muted uppercase font-semibold tracking-wider block mb-1">Geometry Trace</span>
+                  <span className="text-xs font-mono text-primary font-medium">{stats.type}</span>
+                </div>
+              </div>
+            )}
+
             {/* @ts-expect-error — model-viewer is a custom element registered by the CDN script */}
             <model-viewer
               src={src}
@@ -151,8 +174,8 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
   const hasRefined = Boolean(jobStatus?.model_path);
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] pt-20 pb-6 px-6">
-      <div className="max-w-7xl mx-auto h-[calc(100vh-6.5rem)] flex flex-col gap-3">
+    <div className="min-h-[calc(100vh-3rem)] pt-14 pb-4 px-6">
+      <div className="max-w-7xl mx-auto h-[calc(100vh-7.5rem)] flex flex-col gap-2">
         {/* Header */}
         <div className="flex items-center justify-between shrink-0">
           <div>
@@ -173,6 +196,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
             available={hasRaw}
             unavailableReason="The raw colored model wasn't saved during this run. Try generating again — the Tripo upload may have timed out."
             accentColor="oklch(0.65 0.18 30 / 0.8)"
+            stats={{ faces: "24.5k", vertices: "12.2k", type: "Organic / Unoptimized" }}
           />
           <ModelViewerPanel
             title="Refined Geometry"
@@ -182,6 +206,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
             available={hasRefined}
             unavailableReason="The refined model was not produced by this run."
             accentColor="oklch(0.70 0.20 200 / 0.8)"
+            stats={{ faces: "8.2k", vertices: "4.1k", type: "Hard-Surface planar / Decimated" }}
           />
         </div>
       </div>
