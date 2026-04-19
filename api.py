@@ -49,12 +49,16 @@ def run_pipeline(job_id: str, image_path: str):
             description=(
                 f"Use the 'analyze_image' tool on '{image_path}' to visually inspect the object. "
                 "Based on what the tool returns, identify the object's primary geometry — "
-                "its shape, surfaces, and edges. Then determine if 'Hard-Surface' or 'Organic' "
-                "CAD refinement is most appropriate."
+                "its shape, surfaces, and edges. Then determine if 'Mechanical', 'Design', or 'Organic' "
+                "refinement is most appropriate. "
+                "Also identify a SHORT 1-2 word label for the object suitable for a folder name "
+                "(e.g. 'orange powerbank', 'airpods', 'water bottle', 'coffee mug'). "
+                "Include this label clearly in your output."
             ),
             expected_output=(
-                "A technical brief identifying the object and specifying if "
-                "'Hard-Surface' or 'Organic' refinement is needed, based on actual visual analysis."
+                "A technical brief identifying the object, specifying if "
+                "'Mechanical', 'Design', or 'Organic' refinement is needed, "
+                "and a short 1-2 word object label (e.g. 'orange powerbank')."
             ),
             agent=director,
         )
@@ -63,11 +67,15 @@ def run_pipeline(job_id: str, image_path: str):
 
         reconstruct_task = Task(
             description=(
-                f"The Director has analyzed the object. Now use 'generate_3d_model' with "
-                f"the image path '{image_path}' to generate the most accurate 3D reconstruction "
-                "directly from the photo. Return the file path of the resulting refined 3D mesh."
+                f"The Director has analyzed the object. Now use 'generate_3d_model'. "
+                f"You have been provided multiple angles of the object: {image_paths}. "
+                f"CRITICAL: You must pass this EXACT python list of strings {image_paths} "
+                f"as the 'image_paths' parameter to the tool. "
+                f"CRITICAL: From the Director's brief, extract the short 1-2 word object label "
+                f"(e.g. 'orange powerbank') and pass it as the 'object_label' parameter to the tool. "
+                "Return the file path of the resulting refined 3D mesh."
             ),
-            expected_output="The string path to the generated 3D file (e.g., './outputs/.../raw_refined.glb').",
+            expected_output="The string path to the generated 3D file, or a clear error message if the tool fails.",
             agent=artist,
             context=[analyze_task],
         )
