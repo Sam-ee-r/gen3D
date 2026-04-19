@@ -7,7 +7,7 @@ os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
 
 try:
     response = completion(
-        model="groq/qwen/qwen3-32b",
+        model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
         messages=[{"role": "user", "content": "hello"}],
     )
     print(response.choices[0].message.content)

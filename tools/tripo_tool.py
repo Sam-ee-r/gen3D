@@ -53,10 +53,12 @@ def _curl(method, url, headers=None, files=None, json_data=None, output_file=Non
     return {}
 
 
-def smart_refine_geometry(file_path):
+def smart_refine_geometry(file_path, mode="mechanical"):
     """
-    Uses RANSAC to detect geometric primitives (planes/cylinders)
-    and flattens only the areas intended to be 'Hard Surface'.
+    Refines geometry based on the object type.
+    'mechanical': uses RANSAC to flatten planes and cylinders (CAD style).
+    'design': skips RANSAC to preserve smooth ergonomics; uses volume-conservative smoothing.
+    'organic': uses standard vertex smoothing.
     """
     if not os.path.exists(file_path):
         return file_path
@@ -66,28 +68,34 @@ def smart_refine_geometry(file_path):
     if not mesh.has_vertices():
         return file_path
 
-    # 1. Plane Detection (RANSAC)
-    # Finds flat areas like the bottle top and gold ring
-    for _ in range(3):
-        try:
-            plane_model, inliers = mesh.segment_plane(distance_threshold=0.01,
-                                                     ransac_n=3,
-                                                     num_iterations=1000)
+    # 1. Plane Detection (RANSAC) - Skip for 'design' and 'organic'
+    if mode == "mechanical":
+        print("   📐 Mode: Mechanical — Snapping planar surfaces...")
+        for _ in range(3):
+            try:
+                plane_model, inliers = mesh.segment_plane(distance_threshold=0.01,
+                                                         ransac_n=3,
+                                                         num_iterations=1000)
 
-            if len(inliers) > 500:
-                vertices = np.asarray(mesh.vertices)
-                origin = -plane_model[3] * plane_model[:3]
-                normal = plane_model[:3]
-                for idx in inliers:
-                    v = vertices[idx]
-                    dist = np.dot(v - origin, normal)
-                    vertices[idx] = v - dist * normal
-                mesh.vertices = o3d.utility.Vector3dVector(vertices)
-        except Exception:
-            break
+                if len(inliers) > 500:
+                    vertices = np.asarray(mesh.vertices)
+                    origin = -plane_model[3] * plane_model[:3]
+                    normal = plane_model[:3]
+                    for idx in inliers:
+                        v = vertices[idx]
+                        dist = np.dot(v - origin, normal)
+                        vertices[idx] = v - dist * normal
+                    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+            except Exception:
+                break
+    elif mode == "design":
+        print("   💎 Mode: Design — Preserving ergonomic curvatures...")
+    else:
+        print("   🌿 Mode: Organic — Applying standard smoothing...")
 
     # 2. Taubin Smoothing
-    mesh = mesh.filter_smooth_taubin(number_of_iterations=20)
+    iters = 40 if mode == "design" else 20
+    mesh = mesh.filter_smooth_taubin(number_of_iterations=iters)
     mesh.compute_vertex_normals()
 
     # Determine output path while preserving original format (.glb or .obj)
@@ -98,7 +106,7 @@ def smart_refine_geometry(file_path):
     return refined_path
 
 
-def _poll_and_download(task_id: str, headers: dict, label: str = "model") -> str:
+def _poll_and_download(task_id: str, headers: dict, label: str = "model", mode: str = "mechanical") -> str:
     """Polls Tripo until the task completes, then downloads and refines the mesh."""
     print(f"🔄 Processing 3D Model (Task ID: {task_id})...")
     max_attempts = 60
@@ -145,16 +153,16 @@ def _poll_and_download(task_id: str, headers: dict, label: str = "model") -> str
     except Exception as e:
         return f"Download error: {str(e)}"
 
-    print("✨ Applying Smart CAD Refinement...")
-    final_path = smart_refine_geometry(raw_file_path)
+    print(f"✨ Applying {mode.capitalize()} Refinement...")
+    final_path = smart_refine_geometry(raw_file_path, mode=mode)
     return f"Success: Raw model saved at {raw_file_path} | Refined model saved at {final_path}"
 
 
 @tool("generate_3d_model")
-def generate_3d_model(image_path: str):
+def generate_3d_model(image_paths: list, description: str = None):
     """
-    Generates a 3D model directly from a local image file using Tripo AI (image_to_model).
-    Input: local image file path (e.g., './input.jpg').
+    Generates a 3D model directly from local image files using Tripo AI (image_to_model or multiview_to_model).
+    Input: list of local image file paths (e.g., ['./inputs/input1.jpg', './inputs/input2.jpg']).
     Returns the path to the refined 3D mesh file.
     """
     api_key = os.getenv("TRIPO_API_KEY")
@@ -163,20 +171,37 @@ def generate_3d_model(image_path: str):
 
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    # Upload the image
+    # Upload all images
     upload_url = "https://api.tripo3d.ai/v2/openapi/upload"
+    image_tokens = []
     try:
-        resp = _curl("POST", upload_url, headers=headers, files={"file": image_path})
-        image_token = resp["data"]["image_token"]
+        for img_path in image_paths:
+            resp = _curl("POST", upload_url, headers=headers, files={"file": img_path})
+            image_tokens.append(resp["data"]["image_token"])
     except Exception as e:
         return f"Upload error: {str(e)}"
 
-    # Create task
+    # Create task — images only, no extra flags or keyword tweaking
     task_url = "https://api.tripo3d.ai/v2/openapi/task"
-    task_payload = {
-        "type": "image_to_model",
-        "file": {"type": "jpg", "file_token": image_token}
-    }
+
+    if len(image_tokens) > 1:
+        # multiview_to_model requires EXACTLY 4 slots: [front, left, back, right]
+        file_slots = [{} for _ in range(4)]
+        positions = ["front", "left", "back", "right"]
+        for i, token in enumerate(image_tokens[:4]):
+            file_slots[i] = {"type": "jpg", "file_token": token}
+        print(f"🎥 Multiview Mode: {len(image_tokens)} images → positions: {positions[:len(image_tokens)]}")
+        task_payload = {
+            "type": "multiview_to_model",
+            "files": file_slots,
+        }
+    else:
+        task_payload = {
+            "type": "image_to_model",
+            "file": {"type": "jpg", "file_token": image_tokens[0]},
+            "enable_image_autofix": True
+        }
+
     try:
         task_resp = _curl("POST", task_url, headers=headers, json_data=task_payload)
         if "data" not in task_resp:
@@ -185,10 +210,14 @@ def generate_3d_model(image_path: str):
     except Exception as e:
         return f"Task creation error: {str(e)}"
 
-    # Extract the job_id from image_path (e.g. ./inputs/uuid.jpg -> uuid)
-    basename = os.path.basename(image_path)
-    job_id = os.path.splitext(basename)[0]
-    return _poll_and_download(task_id, headers, label=job_id)
+    # Extract job_id from image path (e.g. ./inputs/uuid/0.jpg -> uuid)
+    folder_path = os.path.dirname(image_paths[0])
+    job_id = os.path.basename(folder_path)
+    if not job_id or job_id == "inputs" or job_id == ".":
+        job_id = os.path.splitext(os.path.basename(image_paths[0]))[0]
+
+    folder_label = f"model-{job_id}"
+    return _poll_and_download(task_id, headers, label=folder_label, mode="organic")
 
 
 @tool("generate_3d_from_text")
@@ -234,4 +263,4 @@ def generate_3d_from_text(description: str):
     except Exception as e:
         return f"Task creation error: {str(e)}"
 
-    return _poll_and_download(task_id, headers, label=label)
+    return _poll_and_download(task_id, headers, label=label, mode="organic")

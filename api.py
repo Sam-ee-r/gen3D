@@ -3,6 +3,7 @@ import ssl
 import uuid
 import threading
 import re
+from typing import List
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,7 +35,7 @@ app.add_middleware(
 jobs: dict[str, dict] = {}
 
 
-def run_pipeline(job_id: str, image_path: str):
+def run_pipeline(job_id: str, image_paths: List[str]):
     """Run the full CrewAI pipeline in a background thread."""
     from crewai import Crew, Task, Process
     from agents import create_agents
@@ -44,17 +45,18 @@ def run_pipeline(job_id: str, image_path: str):
         job.update(status="processing", step="Vision Analysis...", progress=8)
 
         director, artist = create_agents()
+        primary_image = image_paths[0]
 
         analyze_task = Task(
             description=(
-                f"Use the 'analyze_image' tool on '{image_path}' to visually inspect the object. "
+                f"Use the 'analyze_image' tool on '{primary_image}' to visually inspect the object. "
                 "Based on what the tool returns, identify the object's primary geometry — "
-                "its shape, surfaces, and edges. Then determine if 'Hard-Surface' or 'Organic' "
-                "CAD refinement is most appropriate."
+                "its shape, surfaces, and edges. Then determine if 'Mechanical', 'Design', or 'Organic' "
+                "refinement is most appropriate."
             ),
             expected_output=(
                 "A technical brief identifying the object and specifying if "
-                "'Hard-Surface' or 'Organic' refinement is needed, based on actual visual analysis."
+                "'Mechanical', 'Design', or 'Organic' refinement is needed."
             ),
             agent=director,
         )
@@ -63,11 +65,15 @@ def run_pipeline(job_id: str, image_path: str):
 
         reconstruct_task = Task(
             description=(
-                f"The Director has analyzed the object. Now use 'generate_3d_model' with "
-                f"the image path '{image_path}' to generate the most accurate 3D reconstruction "
-                "directly from the photo. Return the file path of the resulting refined 3D mesh."
+                f"The Director has analyzed the object. Now use 'generate_3d_model'. "
+                f"You have been provided multiple angles of the object: {image_paths}. "
+                f"CRITICAL: You must pass this EXACT python list of strings {image_paths} "
+                f"as the 'image_paths' parameter to the tool. "
+                f"CRITICAL: You must also pass the full technical brief received from the Director "
+                f"as the 'description' parameter to the tool. "
+                "Return the file path of the resulting refined 3D mesh."
             ),
-            expected_output="The string path to the generated 3D file (e.g., './outputs/.../raw_refined.glb').",
+            expected_output="The string path to the generated 3D file, or a clear error message if the tool fails.",
             agent=artist,
             context=[analyze_task],
         )
@@ -80,7 +86,7 @@ def run_pipeline(job_id: str, image_path: str):
         )
 
         job.update(step="Applying RANSAC Snapping...", progress=60)
-        result = crew.kickoff(inputs={"file_path": image_path})
+        result = crew.kickoff(inputs={"file_path": primary_image})
         result_str = str(result)
 
         job.update(step="Finalizing Geometry...", progress=90)
@@ -124,14 +130,19 @@ def run_pipeline(job_id: str, image_path: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/generate-3d")
-async def generate_3d(file: UploadFile = File(...)):
-    """Accept an image upload, start the pipeline, return a job_id."""
+async def generate_3d(files: List[UploadFile] = File(...)):
+    """Accept multiple image uploads, start the pipeline, return a job_id."""
     job_id = str(uuid.uuid4())
 
-    os.makedirs("inputs", exist_ok=True)
-    image_path = f"./inputs/{job_id}.jpg"
-    with open(image_path, "wb") as f:
-        f.write(await file.read())
+    os.makedirs(f"inputs/{job_id}", exist_ok=True)
+    image_paths = []
+    
+    for i, uploaded_file in enumerate(files):
+        ext = os.path.splitext(uploaded_file.filename)[1] or ".jpg"
+        image_path = f"./inputs/{job_id}/{i}{ext}"
+        with open(image_path, "wb") as f:
+            f.write(await uploaded_file.read())
+        image_paths.append(image_path)
 
     jobs[job_id] = {
         "status": "queued",
@@ -142,7 +153,7 @@ async def generate_3d(file: UploadFile = File(...)):
         "error": None,
     }
 
-    thread = threading.Thread(target=run_pipeline, args=(job_id, image_path), daemon=True)
+    thread = threading.Thread(target=run_pipeline, args=(job_id, image_paths), daemon=True)
     thread.start()
 
     return {"job_id": job_id}

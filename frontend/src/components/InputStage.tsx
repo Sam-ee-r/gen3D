@@ -13,8 +13,8 @@ interface InputStageProps {
 export function InputStage({ onGenerate }: InputStageProps) {
   const [activeTab, setActiveTab] = useState<InputTab>("upload");
   const [prompt, setPrompt] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -26,19 +26,21 @@ export function InputStage({ onGenerate }: InputStageProps) {
   ];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    const files = Array.from(e.target.files || []).slice(0, 3);
+    if (files.length === 0) return;
+    previewUrls.forEach(url => URL.revokeObjectURL(url));
+    setSelectedFiles(files);
+    setPreviewUrls(files.map(f => URL.createObjectURL(f)));
     setError(null);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    const files = Array.from(e.dataTransfer.files || []).slice(0, 3);
+    if (files.length === 0) return;
+    previewUrls.forEach(url => URL.revokeObjectURL(url));
+    setSelectedFiles(files);
+    setPreviewUrls(files.map(f => URL.createObjectURL(f)));
     setError(null);
   };
 
@@ -46,14 +48,16 @@ export function InputStage({ onGenerate }: InputStageProps) {
     setError(null);
 
     if (activeTab === "upload" || activeTab === "camera") {
-      if (!selectedFile) {
-        setError("Please select or capture an image first.");
+      if (selectedFiles.length === 0) {
+        setError("Please select or capture at least one image.");
         return;
       }
       setIsLoading(true);
       try {
         const formData = new FormData();
-        formData.append("file", selectedFile);
+        selectedFiles.forEach(file => {
+          formData.append("files", file);
+        });
         const res = await fetch("/api/generate-3d", { method: "POST", body: formData });
         if (!res.ok) throw new Error(`Server error: ${res.status}`);
         const { job_id } = await res.json();
@@ -118,17 +122,24 @@ export function InputStage({ onGenerate }: InputStageProps) {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 onChange={handleFileChange}
               />
-              {previewUrl ? (
+              {previewUrls.length > 0 ? (
                 <div className="relative z-10 animate-in fade-in zoom-in duration-300">
-                  <img
-                    src={previewUrl}
-                    alt="Preview"
-                    className="mx-auto max-h-48 rounded-lg object-contain mb-3 shadow-lg"
-                  />
-                  <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded-lg"></div>
+                  <div className="flex flex-wrap justify-center gap-4 mb-3">
+                    {previewUrls.map((url, idx) => (
+                      <div key={idx} className="relative">
+                        <img
+                          src={url}
+                          alt={`Preview ${idx + 1}`}
+                          className="max-h-32 sm:max-h-40 rounded-lg object-contain shadow-lg"
+                        />
+                        <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded-lg"></div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="relative z-10 flex flex-col items-center">
@@ -138,10 +149,12 @@ export function InputStage({ onGenerate }: InputStageProps) {
                 </div>
               )}
               <p className="relative z-10 text-sm font-semibold text-foreground group-hover:text-primary transition-colors duration-300">
-                {selectedFile ? selectedFile.name : "Drop your structural image here"}
+                {selectedFiles.length > 0 
+                  ? `${selectedFiles.length} image${selectedFiles.length > 1 ? 's' : ''} selected` 
+                  : "Drop up to 3 structural images here"}
               </p>
               <p className="relative z-10 text-xs text-muted-foreground mt-1.5 font-mono">
-                Supports PNG, JPG (Max 10MB)
+                Supports PNG, JPG (Max 3 files, 10MB each)
               </p>
             </div>
           )}
@@ -153,12 +166,13 @@ export function InputStage({ onGenerate }: InputStageProps) {
                 type="file"
                 accept="image/*"
                 capture="environment"
+                multiple
                 className="hidden"
                 id="camera-input"
                 onChange={handleFileChange}
               />
               <Button variant="outline" className="mt-2" onClick={() => document.getElementById("camera-input")?.click()}>
-                {selectedFile ? `✓ ${selectedFile.name}` : "Open Camera"}
+                {selectedFiles.length > 0 ? `✓ ${selectedFiles.length} Image${selectedFiles.length > 1 ? 's' : ''}` : "Open Camera"}
               </Button>
               <p className="text-xs text-muted-foreground mt-3">
                 Capture a reference photo for mesh generation
