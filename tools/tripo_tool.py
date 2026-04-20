@@ -15,46 +15,25 @@ load_dotenv()
 
 def preprocess_image(image_path: str, output_path: str = "./outputs/preprocessed_input.png") -> str:
     """
-    Prepares an input photo for Tripo AI by:
-    1. Removing the background with rembg.
-    2. Auto-cropping to the object's bounding box.
-    3. Centering it on a square 1024x1024 transparent canvas with 10% padding.
-    Saves the result to output_path and returns that path.
+    Prepares an input photo for Tripo AI by stripping the background natively.
+    CRITICAL: We keep the exact dimensions and positioning of the original image
+    so that Tripo's neural network can correctly infer perspective and focal length.
     """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    print(f"🖼  Pre-processing image: {image_path}")
+    print(f"🖼  Pre-processing image (preserving perspective): {image_path}")
 
-    # Step 1: Remove background
+    # Remove background with rembg
     with open(image_path, "rb") as f:
         raw_bytes = f.read()
+    
     cleaned_bytes = rembg_remove(raw_bytes)
 
-    import io
-    fg = Image.open(io.BytesIO(cleaned_bytes)).convert("RGBA")
+    # Save exactly as it is outputted by the background remover
+    with open(output_path, "wb") as f:
+        f.write(cleaned_bytes)
 
-    # Step 2: Crop to bounding box of non-transparent pixels
-    bbox = fg.getbbox()  # (left, upper, right, lower)
-    if bbox:
-        fg = fg.crop(bbox)
-    else:
-        print("   ⚠️  rembg returned a fully transparent image — using original.")
-        fg = Image.open(image_path).convert("RGBA")
-
-    # Step 3: Fit into a 1024x1024 canvas with 10% padding
-    canvas_size = 1024
-    padding = int(canvas_size * 0.10)
-    max_dim = canvas_size - 2 * padding
-
-    fg.thumbnail((max_dim, max_dim), Image.LANCZOS)
-
-    canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    paste_x = (canvas_size - fg.width) // 2
-    paste_y = (canvas_size - fg.height) // 2
-    canvas.paste(fg, (paste_x, paste_y), fg)
-
-    canvas.save(output_path, "PNG")
-    print(f"   ✅ Preprocessed image saved: {output_path} ({fg.width}×{fg.height} object on {canvas_size}×{canvas_size} canvas)")
+    print(f"   ✅ Preprocessed image saved without perspective distortion: {output_path}")
     return output_path
 
 def _curl(method, url, headers=None, files=None, json_data=None, output_file=None):
@@ -221,7 +200,7 @@ def _poll_and_download(task_id: str, headers: dict, folder_name: str = "object_1
 
 
 @tool("generate_3d_model")
-def generate_3d_model(image_paths: list, description: str = None, object_label: str = "object"):
+def generate_3d_model(image_paths: list, object_label: str = "object"):
     """
     Generates a 3D model from a local image file using Tripo AI (image_to_model).
     Applies local background removal and centering before uploading.
@@ -281,6 +260,8 @@ def generate_3d_model(image_paths: list, description: str = None, object_label: 
     task_payload = {
         "type": "image_to_model",
         "file": {"type": "png", "file_token": image_token},
+        "model_version": "v2.5-20250123",        # Upgraded to newest WebApp model
+        "texture_alignment": "original_image",   # Forces texture to perfectly match the photo view
         "enable_image_autofix": True
     }
 
