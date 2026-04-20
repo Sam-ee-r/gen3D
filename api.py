@@ -68,8 +68,8 @@ def run_pipeline(job_id: str, image_path: str):
         reconstruct_task = Task(
             description=(
                 f"The Director has analyzed the object. Now use 'generate_3d_model'. "
-                f"You have been provided multiple angles of the object: {image_paths}. "
-                f"CRITICAL: You must pass this EXACT python list of strings {image_paths} "
+                f"You have been provided the input image: {image_path}. "
+                f"CRITICAL: You must pass this EXACT python list of strings ['{image_path}'] "
                 f"as the 'image_paths' parameter to the tool. "
                 f"CRITICAL: From the Director's brief, extract the short 1-2 word object label "
                 f"(e.g. 'orange powerbank') and pass it as the 'object_label' parameter to the tool. "
