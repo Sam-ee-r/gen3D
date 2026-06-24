@@ -128,7 +128,7 @@ function ModelViewerPanel({
     const el = viewerRef.current;
     if (!el) return;
     if (decalMode) {
-      el.setAttribute("camera-controls", "");
+      el.removeAttribute("camera-controls");
       el.removeAttribute("auto-rotate");
     } else {
       el.setAttribute("camera-controls", "");
@@ -728,8 +728,10 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
         mesh.lookAt(pos.clone().add(nrm));
         mesh.rotateZ((rotationDeg * Math.PI) / 180);
         
-        // Add directly to scene to avoid any targetMesh transform issues
-        scene.add(mesh);
+        // Critical: Update the world matrix before attaching so attach computes the correct local transform!
+        mesh.updateMatrixWorld(true);
+        // Attach directly to the root scene to avoid nested transform staleness, while preserving world position
+        scene.attach(mesh);
       } else {
         // High quality path for placed stickers: DecalGeometry
         const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
@@ -860,7 +862,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
     const onPointerMove = (e: PointerEvent) => {
       // Check if they are dragging vs just hovering
       if (isPointerDown) {
-        if (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) {
+        if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) {
           isDragging = true;
         }
       }
@@ -908,7 +910,6 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
           const viewerEl = viewerRef.current;
           if (viewerEl) {
             if (typeof viewerEl.queueRender === "function") viewerEl.queueRender();
-            if (typeof (viewerEl as any).requestUpdate === "function") (viewerEl as any).requestUpdate();
             viewerEl.dispatchEvent(new CustomEvent("camera-change"));
             const orig = viewerEl.exposure;
             viewerEl.exposure = orig + 0.0001;
@@ -927,15 +928,36 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       isDragging = false;
     };
 
+    const onWheel = (e: WheelEvent) => {
+      // Only rotate sticker if hovering over the model, otherwise let model-viewer zoom
+      const hit = hitTestAt(e.clientX, e.clientY);
+      if (hit) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 15 : -15;
+        el.dispatchEvent(new CustomEvent("decal-rotate", { detail: { delta } }));
+        
+        // Force an immediate re-render of the ghost sticker with the new rotation
+        const cx = e.clientX;
+        const cy = e.clientY;
+        setTimeout(() => {
+          if (viewerRef.current) {
+            viewerRef.current.dispatchEvent(new PointerEvent("pointermove", { clientX: cx, clientY: cy, bubbles: true }));
+          }
+        }, 50);
+      }
+    };
+
     // Attach listeners. Removing passive flags to prevent Safari listener cleanup bugs
-    el.addEventListener("pointerdown", onPointerDown, { capture: true });
-    el.addEventListener("pointermove", onPointerMove, { capture: true });
-    el.addEventListener("pointerup", onPointerUp, { capture: true });
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("wheel", onWheel, { passive: false });
 
     return () => {
-      el.removeEventListener("pointerdown", onPointerDown, { capture: true });
-      el.removeEventListener("pointermove", onPointerMove, { capture: true });
-      el.removeEventListener("pointerup", onPointerUp, { capture: true });
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("wheel", onWheel);
     };
   }, [activeStudioTab, activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh, placeStickerAt]);
 

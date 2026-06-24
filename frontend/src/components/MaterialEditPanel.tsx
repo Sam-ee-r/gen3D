@@ -494,6 +494,22 @@ export function MaterialEditPanel({
     }
   }, [decalScale, decalRotation, decalOpacity]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Listen to custom decal-rotate events from ReviewStage for mouse wheel rotation
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const onRotate = (e: any) => {
+      setDecalRotation((prev) => {
+        let next = prev + e.detail.delta;
+        if (next > 180) next -= 360;
+        if (next < -180) next += 360;
+        return next;
+      });
+    };
+    el.addEventListener("decal-rotate", onRotate);
+    return () => el.removeEventListener("decal-rotate", onRotate);
+  }, [viewerRef]);
+
 
   // ── Load all materials list from current model ──────────────────────────────
   const getAllMaterials = useCallback((): ModelViewerMaterial[] => {
