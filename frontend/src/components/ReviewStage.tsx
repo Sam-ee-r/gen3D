@@ -261,6 +261,11 @@ function ModelViewerPanel({
 
     scene.traverse((child: any) => {
       if (child.isMesh) {
+        if (child.userData?._isDecal || child.userData?._isGhost) {
+          child.visible = false;
+          return;
+        }
+
         const backup = originalAssets.current.get(child.uuid);
         if (backup) {
           // Save current state
@@ -309,6 +314,11 @@ function ModelViewerPanel({
 
     scene.traverse((child: any) => {
       if (child.isMesh) {
+        if (child.userData?._isDecal || child.userData?._isGhost) {
+          child.visible = true;
+          return;
+        }
+
         const edited = editedAssets.current.get(child.uuid);
         if (edited) {
           const backup = originalAssets.current.get(child.uuid);
@@ -702,8 +712,8 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
         depthTest: true,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4,
+        polygonOffsetFactor: -10,
+        polygonOffsetUnits: -10,
       });
 
       let mesh: any;
@@ -754,6 +764,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       mesh.userData._isGhost = isGhost;
       mesh.renderOrder = 999; // Render on top
       mesh.raycast = () => null; // Disable raycasting completely for sticker meshes
+      mesh.frustumCulled = false; // Prevent model-viewer from aggressively culling it at angles
       return mesh;
     } catch (e) {
       console.warn("Sticker mesh build failed:", e);
@@ -772,67 +783,11 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
 
   const ghostGenerationRef = useRef<number>(0);
 
-  /** Update or create ghost preview sticker on pointermove (React event handler) */
-  const handleOverlayPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!activeDecalConfig?.texture) return;
-    if (rafPendingRef.current) return;
-    const clientX = e.clientX;
-    const clientY = e.clientY;
-    rafPendingRef.current = true;
-    requestAnimationFrame(async () => {
-      rafPendingRef.current = false;
-      
-      // Temporarily hide ghost BEFORE hit test so it doesn't intercept the raycast
-      if (ghostDecalRef.current) {
-        ghostDecalRef.current.visible = false;
-      }
-      
-      const result = hitTestAt(clientX, clientY);
-      const scene = getScene();
-      if (!scene) return;
-      
-      // Now fully remove old ghost
-      if (ghostDecalRef.current) {
-        disposeMesh(ghostDecalRef.current);
-        ghostDecalRef.current = null;
-      }
-      if (!result) return;
-      
-      const currentGeneration = ++ghostGenerationRef.current;
-      
-      const mesh = await buildStickerMesh(
-        result.position,
-        result.normal,
-        activeDecalConfig.texture,
-        activeDecalConfig.scale,
-        activeDecalConfig.rotation,
-        activeDecalConfig.opacity,
-        true,
-      );
-      
-      if (currentGeneration !== ghostGenerationRef.current) {
-        // A newer ghost was requested while we were building this one. Discard to prevent orphaned meshes!
-        disposeMesh(mesh);
-        return;
-      }
-      
-      if (mesh) {
-        ghostDecalRef.current = mesh;
-        const el = viewerRef.current;
-        if (el) {
-          if (typeof el.queueRender === "function") el.queueRender();
-          // Force WebGL redraw hack to wake up the sleeping renderer
-          el.dispatchEvent(new CustomEvent("camera-change"));
-          const orig = el.exposure;
-          el.exposure = orig + 0.0001;
-          setTimeout(() => { if (el.exposure === orig + 0.0001) el.exposure = orig; }, 16);
-        }
-      }
-    });
-  }, [activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh]);
+  // Removed legacy handleOverlayPointerMove since it's now handled by the native event listener
 
-  /** Confirm sticker placement on click (React event handler on the overlay div) */
-  const handleOverlayClick = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
+
+  /** Confirm sticker placement on click */
+  const placeStickerAt = useCallback(async (clientX: number, clientY: number) => {
     if (!activeDecalConfig?.texture) return;
     
     // Hide ghost BEFORE hit test so it doesn't intercept
@@ -840,7 +795,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       ghostDecalRef.current.visible = false;
     }
     
-    const result = hitTestAt(e.clientX, e.clientY);
+    const result = hitTestAt(clientX, clientY);
     if (!result) return;
     const scene = getScene();
     if (!scene) return;
@@ -886,6 +841,104 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       ghostDecalRef.current = null;
     }
   }, [activeStudioTab, disposeMesh]);
+
+  // Native event listeners on model-viewer for "Drag to Orbit, Click to Place"
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el || activeStudioTab !== "decalPlacer" || !activeDecalConfig?.texture) return;
+
+    let startX = 0;
+    let startY = 0;
+    let isDragging = false;
+    let isPointerDown = false;
+
+    const onPointerDown = (e: PointerEvent) => {
+      startX = e.clientX;
+      startY = e.clientY;
+      isDragging = false;
+      isPointerDown = true;
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      // Check if they are dragging vs just hovering
+      if (isPointerDown) {
+        if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) {
+          isDragging = true;
+        }
+      }
+
+      // We still update the ghost preview while moving or dragging
+      if (rafPendingRef.current) return;
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      rafPendingRef.current = true;
+      requestAnimationFrame(async () => {
+        rafPendingRef.current = false;
+        
+        // DO NOT hide the old ghost here, otherwise it flickers during the async buildStickerMesh
+        const result = hitTestAt(clientX, clientY);
+        const scene = getScene();
+        if (!scene) return;
+        
+        if (!result) return;
+        
+        const currentGeneration = ++ghostGenerationRef.current;
+        
+        const mesh = await buildStickerMesh(
+          result.position,
+          result.normal,
+          activeDecalConfig.texture,
+          activeDecalConfig.scale,
+          activeDecalConfig.rotation,
+          activeDecalConfig.opacity,
+          true,
+        );
+        
+        if (currentGeneration !== ghostGenerationRef.current) {
+          disposeMesh(mesh);
+          return;
+        }
+        
+        // NOW we can safely dispose the old ghost and swap in the new one
+        if (ghostDecalRef.current) {
+          disposeMesh(ghostDecalRef.current);
+          ghostDecalRef.current = null;
+        }
+
+        if (mesh) {
+          ghostDecalRef.current = mesh;
+          const viewerEl = viewerRef.current;
+          if (viewerEl) {
+            if (typeof viewerEl.queueRender === "function") viewerEl.queueRender();
+            viewerEl.dispatchEvent(new CustomEvent("camera-change"));
+            const orig = viewerEl.exposure;
+            viewerEl.exposure = orig + 0.0001;
+            setTimeout(() => { if (viewerEl.exposure === orig + 0.0001) viewerEl.exposure = orig; }, 16);
+          }
+        }
+      });
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      isPointerDown = false;
+      if (!isDragging) {
+        // Quick click -> Place sticker!
+        placeStickerAt(e.clientX, e.clientY);
+      }
+      isDragging = false;
+    };
+
+    // Attach listeners. Removing passive flags to prevent Safari listener cleanup bugs
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+
+    return () => {
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [activeStudioTab, activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh, placeStickerAt]);
 
   // Decal callbacks for MaterialEditPanel UI
   const decalCallbacks: DecalCallbacks = {
@@ -1012,17 +1065,8 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
                 viewerRef={viewerRef}
                 decalMode={activeStudioTab === "decalPlacer"}
               />
-              {/* Transparent overlay that captures pointer events for decal placement.
-                  model-viewer's shadow DOM swallows pointer events, so we place this
-                  transparent div on TOP of the viewer to reliably capture clicks. */}
-              {activeStudioTab === "decalPlacer" && activeDecalConfig?.texture && (
-                <div
-                  className="absolute inset-0 z-20"
-                  style={{ cursor: "crosshair" }}
-                  onPointerMove={handleOverlayPointerMove}
-                  onClick={handleOverlayClick}
-                />
-              )}
+              {/* The blocking overlay div was removed to allow native orbit controls.
+                  The logic is now handled by native pointer events on viewerRef.current. */}
               {/* Floating sticker placement badge */}
               {activeStudioTab === "decalPlacer" && activeDecalConfig?.texture && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-in fade-in duration-300">
@@ -1047,7 +1091,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
                 activeDecalConfig={activeDecalConfig ?? undefined}
                 onActiveDecalConfigChange={(cfg) => {
                   setActiveDecalConfig(cfg);
-                  setActiveStudioTab("decalPlacer");
+                  // Removed setActiveStudioTab("decalPlacer") to fix race condition tab sync bug!
                 }}
                 onTabChange={(tab) => setActiveStudioTab(tab)}
               />
