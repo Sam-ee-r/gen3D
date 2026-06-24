@@ -728,10 +728,8 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
         mesh.lookAt(pos.clone().add(nrm));
         mesh.rotateZ((rotationDeg * Math.PI) / 180);
         
-        // Critical: Update the world matrix before attaching so targetMesh.attach computes the correct local transform!
-        mesh.updateMatrixWorld(true);
-        // Attach to the specific target mesh so it moves/rotates with it.
-        targetMesh.attach(mesh);
+        // Add directly to scene to avoid any targetMesh transform issues
+        scene.add(mesh);
       } else {
         // High quality path for placed stickers: DecalGeometry
         const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
