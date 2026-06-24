@@ -128,7 +128,7 @@ function ModelViewerPanel({
     const el = viewerRef.current;
     if (!el) return;
     if (decalMode) {
-      el.removeAttribute("camera-controls");
+      el.setAttribute("camera-controls", "");
       el.removeAttribute("auto-rotate");
     } else {
       el.setAttribute("camera-controls", "");
@@ -860,7 +860,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
     const onPointerMove = (e: PointerEvent) => {
       // Check if they are dragging vs just hovering
       if (isPointerDown) {
-        if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) {
+        if (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) {
           isDragging = true;
         }
       }
@@ -908,6 +908,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
           const viewerEl = viewerRef.current;
           if (viewerEl) {
             if (typeof viewerEl.queueRender === "function") viewerEl.queueRender();
+            if (typeof (viewerEl as any).requestUpdate === "function") (viewerEl as any).requestUpdate();
             viewerEl.dispatchEvent(new CustomEvent("camera-change"));
             const orig = viewerEl.exposure;
             viewerEl.exposure = orig + 0.0001;
@@ -927,14 +928,14 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
     };
 
     // Attach listeners. Removing passive flags to prevent Safari listener cleanup bugs
-    el.addEventListener("pointerdown", onPointerDown);
-    el.addEventListener("pointermove", onPointerMove);
-    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointerdown", onPointerDown, { capture: true });
+    el.addEventListener("pointermove", onPointerMove, { capture: true });
+    el.addEventListener("pointerup", onPointerUp, { capture: true });
 
     return () => {
-      el.removeEventListener("pointerdown", onPointerDown);
-      el.removeEventListener("pointermove", onPointerMove);
-      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      el.removeEventListener("pointermove", onPointerMove, { capture: true });
+      el.removeEventListener("pointerup", onPointerUp, { capture: true });
     };
   }, [activeStudioTab, activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh, placeStickerAt]);
 
