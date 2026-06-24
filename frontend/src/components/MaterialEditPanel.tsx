@@ -382,6 +382,10 @@ export function MaterialEditPanel({
   const [textContent, setTextContent] = useState<string>("HELLO");
   const [textFont, setTextFont] = useState<string>(TEXT_FONTS[0].value);
   const [textColor, setTextColor] = useState<string>("#ffffff");
+  // Image sticker mode
+  const [stickerMode, setStickerMode] = useState<"text" | "image">("text");
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedImageFile, setUploadedImageFile] = useState<File | null>(null);
   // Shared transform
   const [decalScale, setDecalScale] = useState<number>(1.0);
   const [decalRotation, setDecalRotation] = useState<number>(0);
@@ -480,12 +484,87 @@ export function MaterialEditPanel({
     }).catch(() => {});
   }, [textContent, textFont, textColor, notifyDecalConfig, decalScale, decalRotation, decalOpacity]);
 
-  // Re-render text texture whenever text inputs change
+  /** Render the uploaded image to the hidden canvas and create/update its CanvasTexture. */
+  const processImageToTexture = useCallback((imageUrl: string) => {
+    const canvas = textCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 256;
+      let W = img.width;
+      let H = img.height;
+      
+      if (W > maxDim || H > maxDim) {
+        if (W > H) {
+          H = Math.floor((H / W) * maxDim);
+          W = maxDim;
+        } else {
+          W = Math.floor((W / H) * maxDim);
+          H = maxDim;
+        }
+      }
+
+      canvas.width = W;
+      canvas.height = H;
+      ctx.clearRect(0, 0, W, H);
+      ctx.drawImage(img, 0, 0, W, H);
+
+      import("three").then(({ CanvasTexture }) => {
+        if (activeTextureRef.current && activeTextureRef.current._isCanvasTexture) {
+          activeTextureRef.current.image = canvas;
+          activeTextureRef.current._aspectRatio = W / H;
+          activeTextureRef.current.needsUpdate = true;
+          notifyDecalConfig(activeTextureRef.current, uploadedImageFile?.name || "Image", decalScale, decalRotation, decalOpacity);
+        } else {
+          const tex = new CanvasTexture(canvas);
+          (tex as any)._isCanvasTexture = true;
+          (tex as any)._aspectRatio = W / H;
+          notifyDecalConfig(tex, uploadedImageFile?.name || "Image", decalScale, decalRotation, decalOpacity);
+        }
+      }).catch(() => {});
+    };
+    img.src = imageUrl;
+  }, [notifyDecalConfig, decalScale, decalRotation, decalOpacity, uploadedImageFile]);
+
+  // Re-render texture whenever inputs or modes change
   useEffect(() => {
     if (activeStudioTab === "decalPlacer") {
-      renderTextToTexture();
+      if (stickerMode === "text") {
+        renderTextToTexture();
+      } else if (stickerMode === "image" && uploadedImage) {
+        processImageToTexture(uploadedImage);
+      }
     }
-  }, [textContent, textFont, textColor, activeStudioTab, renderTextToTexture]);
+  }, [textContent, textFont, textColor, activeStudioTab, stickerMode, uploadedImage, renderTextToTexture, processImageToTexture]);
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Validate file type
+    if (!["image/jpeg", "image/png"].includes(file.type)) {
+      alert("Only PNG and JPEG images are supported.");
+      return;
+    }
+    
+    // Validate file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Image size exceeds 10MB limit.");
+      return;
+    }
+    
+    // If there was a previous image, revoke its URL to avoid memory leaks
+    if (uploadedImage) {
+      URL.revokeObjectURL(uploadedImage);
+    }
+
+    const url = URL.createObjectURL(file);
+    setUploadedImageFile(file);
+    setUploadedImage(url);
+  }, [uploadedImage]);
 
   // Notify transform changes immediately so preview updates
   useEffect(() => {
@@ -946,7 +1025,32 @@ export function MaterialEditPanel({
 
             <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
 
+              {/* Mode Toggle */}
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-black/20 border border-white/5">
+                <button
+                  onClick={() => setStickerMode("text")}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-lg transition-all ${
+                    stickerMode === "text"
+                      ? "bg-primary/20 text-primary shadow-sm"
+                      : "text-tech-muted hover:text-tech-fg"
+                  }`}
+                >
+                  <Type className="w-3 h-3" /> Text
+                </button>
+                <button
+                  onClick={() => setStickerMode("image")}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-semibold uppercase tracking-wider rounded-lg transition-all ${
+                    stickerMode === "image"
+                      ? "bg-primary/20 text-primary shadow-sm"
+                      : "text-tech-muted hover:text-tech-fg"
+                  }`}
+                >
+                  <ImageIcon className="w-3 h-3" /> Image
+                </button>
+              </div>
+
               {/* ── TEXT MODE ──────────────────────────────────── */}
+              {stickerMode === "text" && (
               <div className="flex flex-col gap-3 animate-in fade-in duration-200">
                   {/* Text input */}
                   <div className="flex flex-col gap-1.5">
@@ -1011,6 +1115,32 @@ export function MaterialEditPanel({
                     </span>
                   </div>
                 </div>
+              )}
+
+              {/* ── IMAGE MODE ─────────────────────────────────── */}
+              {stickerMode === "image" && (
+                <div className="flex flex-col gap-3 animate-in fade-in duration-200">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[9px] font-mono text-tech-muted uppercase tracking-widest">Upload Image</span>
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors relative overflow-hidden group">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <ImageIcon className="w-6 h-6 mb-2 text-tech-muted group-hover:text-primary transition-colors" />
+                        <p className="mb-1 text-[10px] text-tech-muted font-mono"><span className="font-semibold text-tech-fg group-hover:text-primary">Click to upload</span></p>
+                        <p className="text-[8px] text-tech-muted/70 font-mono">PNG or JPG (Max 10MB)</p>
+                      </div>
+                      <input type="file" className="hidden" accept="image/png, image/jpeg, image/jpg" onChange={handleFileUpload} />
+                      {uploadedImage && (
+                        <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-2 backdrop-blur-sm transition-opacity">
+                          <img src={uploadedImage} alt="Uploaded" className="max-h-full max-w-full object-contain rounded drop-shadow-lg border border-white/10" />
+                          <div className="absolute top-2 right-2 bg-black/60 p-1 rounded backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span className="text-[8px] text-white font-mono uppercase tracking-widest">Change</span>
+                          </div>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+                </div>
+              )}
 
               {/* ── SHARED: Transform Controls ──────────────── */}
               <div className="flex flex-col gap-2.5 pt-1 border-t border-white/5">
