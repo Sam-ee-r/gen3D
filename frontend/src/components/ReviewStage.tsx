@@ -1,30 +1,395 @@
-import { useState, useEffect } from "react";
-import { Download, Grid3X3, AlertTriangle } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
+import { Download, Grid3X3, AlertTriangle, Eye, Stamp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MaterialEditPanel } from "./MaterialEditPanel";
+import type { ActiveDecalConfig, ConfirmedDecal, DecalCallbacks } from "./MaterialEditPanel";
+// No need for Three.js Raycaster — we use model-viewer's public positionAndNormalFromPoint() API
+import type { ModelViewerElement, ModelViewerMaterial } from "../model-viewer.d.ts";
 import "../model-viewer.d.ts";
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Local Error Boundary to prevent page-level crashes and credit loss
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallbackTitle: string;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class LocalErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = {
+    hasError: false,
+    error: null,
+  };
+
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Material Studio error caught:", error, errorInfo);
+  }
+
+  private handleReset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  public render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 bg-tech-bg/40 backdrop-blur-md rounded-2xl border border-red-500/20 text-center gap-4 h-full min-h-[300px]">
+          <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+            <AlertTriangle className="w-6 h-6 text-red-500" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-tech-fg">{this.props.fallbackTitle}</p>
+            <p className="text-[10px] text-red-400 font-mono mt-1.5 max-w-xs mx-auto bg-black/40 p-2 rounded border border-white/5 whitespace-pre-wrap break-all select-all">
+              {this.state.error?.message || "Unknown error"}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={this.handleReset}
+            className="mt-2 text-xs bg-white/5 hover:bg-white/10 text-tech-fg border border-white/10"
+          >
+            Reset Component
+          </Button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+
 
 interface ModelViewerPanelProps {
   title: string;
   subtitle: string;
   src: string;
+  refinedSrc?: string;
   filename: string;
+  refinedFilename?: string;
   available: boolean;
+  refinedAvailable?: boolean;
   unavailableReason?: string;
   accentColor?: string;
   stats?: { faces: string; vertices: string; type: string };
+  viewerRef?: React.RefObject<ModelViewerElement | null>;
+  decalMode?: boolean;
 }
 
 function ModelViewerPanel({
   title,
   subtitle,
   src,
+  refinedSrc,
   filename,
+  refinedFilename = "model_refined.glb",
   available,
+  refinedAvailable = false,
   unavailableReason,
   accentColor = "oklch(0.7 0.2 200)",
   stats,
+  viewerRef: externalRef,
+  decalMode = false,
 }: ModelViewerPanelProps) {
   const [wireframe, setWireframe] = useState(false);
+  const [isTogglingWireframe, setIsTogglingWireframe] = useState(false);
+  const [isComparing, setIsComparing] = useState(false);
+  const [transitionSnapshot, setTransitionSnapshot] = useState<string | null>(null);
+  const [isFading, setIsFading] = useState(false);
+  const internalRef = useRef<ModelViewerElement | null>(null);
+  const viewerRef = externalRef ?? internalRef;
+
+  // Refs for tracking original and edited mesh states
+  const originalAssets = useRef<Map<string, { map: any; image: any; colorArray?: Float32Array }>>(new Map());
+  const editedAssets = useRef<Map<string, { map: any; image: any; colorArray?: Float32Array }>>(new Map());
+
+  // Clear caches when model source changes
+  useEffect(() => {
+    originalAssets.current.clear();
+    editedAssets.current.clear();
+    setIsComparing(false);
+    setTransitionSnapshot(null);
+    setIsFading(false);
+  }, [src]);
+
+  // Toggle camera-controls and auto-rotate when entering/leaving decal placement mode.
+  // We do this imperatively because model-viewer is a web component and React
+  // doesn't reliably toggle boolean attributes on custom elements.
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    if (decalMode) {
+      el.removeAttribute("camera-controls");
+      el.removeAttribute("auto-rotate");
+    } else {
+      el.setAttribute("camera-controls", "");
+      el.setAttribute("auto-rotate", "");
+    }
+  }, [decalMode, viewerRef]);
+
+  // Capture current canvas frame as a snapshot for cross-fade
+  const captureSnapshot = useCallback(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    try {
+      const snapshot = el.toDataURL();
+      setTransitionSnapshot(snapshot);
+      setIsFading(false);
+    } catch (e) {
+      console.warn("Failed to capture snapshot:", e);
+    }
+  }, [viewerRef]);
+
+  // Start fade out animation
+  const startFadeOut = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setIsFading(true);
+      });
+    });
+  }, []);
+
+  // Backup all mesh textures/vertex colors when model loads
+  const backupOriginalAssets = useCallback(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const symbols = Object.getOwnPropertySymbols(el);
+    const sceneSymbol = symbols.find((s) => s.description === "scene");
+    if (!sceneSymbol) return;
+    const scene = (el as any)[sceneSymbol];
+    if (!scene) return;
+
+    scene.traverse((child: any) => {
+      if (child.isMesh) {
+        if (!originalAssets.current.has(child.uuid)) {
+          originalAssets.current.set(child.uuid, {
+            map: child.material?.map || null,
+            image: child.material?.map?.image || null,
+            colorArray: child.geometry?.attributes?.color
+              ? new Float32Array(child.geometry.attributes.color.array)
+              : undefined,
+          });
+        }
+      }
+    });
+  }, [viewerRef]);
+
+  // ── Wireframe ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+
+    const applyWireframe = () => {
+      const symbols = Object.getOwnPropertySymbols(el);
+      const sceneSymbol = symbols.find((s) => s.description === "scene");
+      if (!sceneSymbol) return;
+
+      const scene = (el as any)[sceneSymbol];
+      if (!scene) return;
+
+      scene.traverse((child: any) => {
+        if (child.isMesh && child.material) {
+          const materials = Array.isArray(child.material)
+            ? child.material
+            : [child.material];
+          materials.forEach((mat: any) => {
+            mat.wireframe = wireframe;
+          });
+        }
+      });
+
+      if (typeof el.queueRender === "function") {
+        el.queueRender();
+      }
+    };
+
+    if (el.loaded) {
+      applyWireframe();
+      backupOriginalAssets();
+    }
+
+    const handleLoad = () => {
+      setTimeout(() => {
+        applyWireframe();
+        backupOriginalAssets();
+      }, 50);
+    };
+
+    el.addEventListener("load", handleLoad);
+    return () => {
+      el.removeEventListener("load", handleLoad);
+    };
+  }, [wireframe, src, backupOriginalAssets]);
+
+
+
+
+
+  const toggleWireframe = () => {
+    captureSnapshot();
+    setIsTogglingWireframe(true);
+    setTimeout(() => {
+      setWireframe((prev) => !prev);
+      setIsTogglingWireframe(false);
+      startFadeOut();
+    }, 150);
+  };
+
+  const handleCompareStart = useCallback(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+
+    captureSnapshot();
+
+    const symbols = Object.getOwnPropertySymbols(el);
+    const sceneSymbol = symbols.find((s) => s.description === "scene");
+    if (!sceneSymbol) return;
+    const scene = (el as any)[sceneSymbol];
+    if (!scene) return;
+
+    setIsComparing(true);
+    editedAssets.current.clear();
+
+    scene.traverse((child: any) => {
+      if (child.isMesh) {
+        const backup = originalAssets.current.get(child.uuid);
+        if (backup) {
+          // Save current state
+          editedAssets.current.set(child.uuid, {
+            map: child.material?.map || null,
+            image: child.material?.map?.image || null,
+            colorArray: child.geometry?.attributes?.color
+              ? new Float32Array(child.geometry.attributes.color.array)
+              : undefined,
+          });
+
+          // Swap to original
+          if (child.material?.map && backup.image) {
+            child.material.map.image = backup.image;
+            child.material.map.needsUpdate = true;
+          }
+          if (child.geometry?.attributes?.color && backup.colorArray) {
+            (child.geometry.attributes.color.array as Float32Array).set(backup.colorArray);
+            child.geometry.attributes.color.needsUpdate = true;
+          }
+        }
+      }
+    });
+
+    if (typeof el.queueRender === "function") {
+      el.queueRender();
+    }
+    startFadeOut();
+  }, [viewerRef, captureSnapshot, startFadeOut]);
+
+  const handleCompareEnd = useCallback((skipSnapshot = false) => {
+    const el = viewerRef.current;
+    if (!el) return;
+
+    if (!skipSnapshot) {
+      captureSnapshot();
+    }
+
+    const symbols = Object.getOwnPropertySymbols(el);
+    const sceneSymbol = symbols.find((s) => s.description === "scene");
+    if (!sceneSymbol) return;
+    const scene = (el as any)[sceneSymbol];
+    if (!scene) return;
+
+    setIsComparing(false);
+
+    scene.traverse((child: any) => {
+      if (child.isMesh) {
+        const edited = editedAssets.current.get(child.uuid);
+        if (edited) {
+          const backup = originalAssets.current.get(child.uuid);
+          // Restore edited state
+          if (child.material?.map && edited.image) {
+            // Only restore if the current image is still the original backup
+            if (!backup || child.material.map.image === backup.image) {
+              child.material.map.image = edited.image;
+              child.material.map.needsUpdate = true;
+            }
+          }
+          if (child.geometry?.attributes?.color && edited.colorArray) {
+            // Check if vertex colors were modified during comparison
+            const colorArray = child.geometry.attributes.color.array as Float32Array;
+            let isUnmodified = true;
+            if (backup?.colorArray) {
+              for (let i = 0; i < colorArray.length; i++) {
+                if (colorArray[i] !== backup.colorArray[i]) {
+                  isUnmodified = false;
+                  break;
+                }
+              }
+            }
+            if (isUnmodified) {
+              (child.geometry.attributes.color.array as Float32Array).set(edited.colorArray);
+              child.geometry.attributes.color.needsUpdate = true;
+            }
+          }
+        }
+      }
+    });
+
+    if (typeof el.queueRender === "function") {
+      el.queueRender();
+    }
+
+    if (!skipSnapshot) {
+      startFadeOut();
+    }
+  }, [viewerRef, captureSnapshot, startFadeOut]);
+
+  // Reset comparing state when an edit is made
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+
+    const handleModelEdited = () => {
+      setIsComparing((prev) => {
+        if (prev) {
+          handleCompareEnd(true);
+          return false;
+        }
+        return prev;
+      });
+    };
+
+    el.addEventListener("model-edited", handleModelEdited);
+    return () => {
+      el.removeEventListener("model-edited", handleModelEdited);
+    };
+  }, [viewerRef, handleCompareEnd]);
+
+  // Listen to the model-editing event from edit panel and trigger cross-fade
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+
+    const handleModelEditing = (e: any) => {
+      const snapshot = e.detail?.snapshot;
+      if (snapshot) {
+        setTransitionSnapshot(snapshot);
+        setIsFading(false);
+        startFadeOut();
+      }
+    };
+
+    el.addEventListener("model-editing", handleModelEditing);
+    return () => {
+      el.removeEventListener("model-editing", handleModelEditing);
+    };
+  }, [viewerRef, startFadeOut]);
 
   const handleDownload = async () => {
     try {
@@ -42,6 +407,23 @@ function ModelViewerPanel({
     }
   };
 
+  const handleDownloadRefined = async () => {
+    if (!refinedSrc) return;
+    try {
+      const res = await fetch(refinedSrc);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = refinedFilename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Could not download refined CAD file.");
+    }
+  };
+
   return (
     <div className="flex-1 min-w-0 bg-tech-bg rounded-2xl border border-tech-border flex flex-col overflow-hidden">
       {/* Toolbar */}
@@ -55,13 +437,45 @@ function ModelViewerPanel({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setWireframe(!wireframe)}
+              disabled={isTogglingWireframe}
+              onClick={toggleWireframe}
               className={`gap-1.5 text-xs ${
-                wireframe ? "text-primary" : "text-tech-muted hover:text-tech-fg"
+                wireframe
+                  ? "text-primary bg-primary/5 border border-primary/20"
+                  : "text-tech-muted hover:text-tech-fg"
               }`}
             >
               <Grid3X3 className="w-3.5 h-3.5" />
-              Wireframe
+              {isTogglingWireframe ? "Processing..." : "Wireframe"}
+            </Button>
+          )}
+          {available && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onMouseEnter={() => handleCompareStart()}
+              onMouseLeave={() => handleCompareEnd(false)}
+              onTouchStart={() => handleCompareStart()}
+              onTouchEnd={() => handleCompareEnd(false)}
+              className={`gap-1.5 text-xs border select-none ${
+                isComparing
+                  ? "text-primary bg-primary/5 border-primary/20"
+                  : "text-tech-muted hover:text-tech-fg border-transparent hover:border-white/5"
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Compare
+            </Button>
+          )}
+          {refinedAvailable && refinedSrc && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadRefined}
+              className="gap-1.5 text-tech-muted hover:text-tech-fg border-tech-border hover:bg-white/5 text-xs"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download Refined (CAD)
             </Button>
           )}
           <Button
@@ -112,25 +526,42 @@ function ModelViewerPanel({
               </div>
             )}
 
+
+
+            {/* model-viewer */}
             {/* @ts-expect-error — model-viewer is a custom element registered by the CDN script */}
             <model-viewer
+              ref={viewerRef}
               src={src}
               alt={title}
-              auto-rotate
               camera-controls
+              auto-rotate
               shadow-intensity="1"
               exposure="1"
               style={{
                 width: "100%",
                 height: "100%",
                 background: "transparent",
-                "--mv-wireframe-color": wireframe ? accentColor : "transparent",
+                cursor: decalMode ? "crosshair" : "default",
               }}
             />
+            {transitionSnapshot && (
+              <img
+                src={transitionSnapshot}
+                alt="Transition Snapshot"
+                className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-300 z-20 ${
+                  isFading ? "opacity-0" : "opacity-100"
+                }`}
+                onTransitionEnd={() => {
+                  setTransitionSnapshot(null);
+                }}
+              />
+            )}
           </>
         ) : (
           /* Not available placeholder */
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6"
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6"
             style={{
               backgroundImage: `linear-gradient(oklch(0.5 0.05 200 / 0.08) 1px, transparent 1px), linear-gradient(90deg, oklch(0.5 0.05 200 / 0.08) 1px, transparent 1px)`,
               backgroundSize: "40px 40px",
@@ -154,6 +585,10 @@ interface JobStatus {
   status: string;
   model_path: string | null;
   raw_model_path: string | null;
+  raw_stats?: { faces: number; vertices: number } | null;
+  refined_stats?: { faces: number; vertices: number } | null;
+  input_type: "image" | null;
+  input_value: string | null;
 }
 
 interface ReviewStageProps {
@@ -162,6 +597,16 @@ interface ReviewStageProps {
 
 export function ReviewStage({ jobId }: ReviewStageProps) {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const viewerRef = useRef<ModelViewerElement | null>(null);
+
+  // ── Decal Studio State (lifted from MaterialEditPanel to ReviewStage) ───────
+  const [activeStudioTab, setActiveStudioTab] = useState<"colorChanger" | "meshSettings" | "decalPlacer">("colorChanger");
+  const [activeDecalConfig, setActiveDecalConfig] = useState<ActiveDecalConfig | null>(null);
+  const [confirmedDecals, setConfirmedDecals] = useState<ConfirmedDecal[]>([]);
+  // Ghost preview decal mesh ref
+  const ghostDecalRef = useRef<any>(null);
+  // rAF throttle for pointermove raycasting
+  const rafPendingRef = useRef<boolean>(false);
 
   useEffect(() => {
     fetch(`/api/status/${jobId}`)
@@ -173,41 +618,443 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
   const hasRaw = Boolean(jobStatus?.raw_model_path);
   const hasRefined = Boolean(jobStatus?.model_path);
 
+  // ── Decal helpers ────────────────────────────────────────────────────
+
+  /** Get the internal Three.js scene from model-viewer */
+  const getScene = useCallback(() => {
+    const el = viewerRef.current;
+    if (!el) return null;
+    const symbols = Object.getOwnPropertySymbols(el);
+    const sym = symbols.find((s) => s.description === "scene");
+    if (!sym) return null;
+    return (el as any)[sym] as any;
+  }, []);
+
+  /** Hit-test using model-viewer's public positionAndNormalFromPoint() API.
+   *  Returns { position: {x,y,z}, normal: {x,y,z} } or null if no surface hit. */
+  const hitTestAt = useCallback((clientX: number, clientY: number) => {
+    const el = viewerRef.current as any;
+    if (!el) return null;
+    // model-viewer v3/v4 public API
+    if (typeof el.positionAndNormalFromPoint !== "function") {
+      console.warn("model-viewer.positionAndNormalFromPoint not available");
+      return null;
+    }
+    const result = el.positionAndNormalFromPoint(clientX, clientY);
+    if (!result) return null;
+    return result; // { position: Vector3D, normal: Vector3D }
+  }, []);
+
+  /** Build a DecalGeometry sticker mesh wrapped to the surface. */
+  const buildStickerMesh = useCallback(async (
+    position: { x: number; y: number; z: number },
+    normal: { x: number; y: number; z: number },
+    texture: any,
+    scale: number,
+    rotationDeg: number,
+    opacity: number,
+    isGhost: boolean,
+  ) => {
+    try {
+      const {
+        Mesh, MeshBasicMaterial, Vector3, Euler, Object3D, Raycaster, PlaneGeometry, DoubleSide
+      } = await import("three");
+
+      const pos = new Vector3(position.x, position.y, position.z);
+      const nrm = new Vector3(normal.x, normal.y, normal.z).normalize();
+
+      const scene = getScene();
+      if (!scene) return null;
+
+      // We need to find the specific Mesh that was clicked.
+      const rayOrigin = pos.clone().add(nrm.clone().multiplyScalar(0.01));
+      const rayDirection = nrm.clone().multiplyScalar(-1);
+      const raycaster = new Raycaster(rayOrigin, rayDirection);
+
+      const meshes: any[] = [];
+      scene.traverse((child: any) => {
+        if (child.isMesh && !child.userData._isDecal) {
+          meshes.push(child);
+        }
+      });
+
+      const intersects = raycaster.intersectObjects(meshes, false);
+      if (intersects.length === 0 && meshes.length === 0) return null;
+      
+      const targetMesh = intersects.length > 0 ? intersects[0].object : meshes[0];
+
+      // Calculate orientation for the decal
+      const dummy = new Object3D();
+      dummy.position.copy(pos);
+      dummy.lookAt(pos.clone().add(nrm));
+      dummy.rotateZ((rotationDeg * Math.PI) / 180);
+      const orientation = new Euler().copy(dummy.rotation);
+
+      // Aspect ratio from texture metadata
+      const aspect = texture._aspectRatio ?? 1;
+      const w = scale * 0.12;
+      const h = w / aspect;
+
+      const mat = new MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: isGhost ? Math.min(opacity, 0.5) : opacity,
+        depthTest: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+      });
+
+      let mesh: any;
+
+      if (isGhost) {
+        // Fast path for real-time hover: PlaneGeometry
+        const geom = new PlaneGeometry(w, h);
+        mat.side = DoubleSide;
+        mesh = new Mesh(geom, mat);
+        const offset = nrm.clone().multiplyScalar(0.001);
+        mesh.position.copy(pos.clone().add(offset));
+        mesh.lookAt(pos.clone().add(nrm));
+        mesh.rotateZ((rotationDeg * Math.PI) / 180);
+        
+        // Critical: Update the world matrix before attaching so targetMesh.attach computes the correct local transform!
+        mesh.updateMatrixWorld(true);
+        // Attach to the specific target mesh so it moves/rotates with it.
+        targetMesh.attach(mesh);
+      } else {
+        // High quality path for placed stickers: DecalGeometry
+        const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
+        const depth = Math.max(w, h) * 2;
+        const size = new Vector3(w, h, depth);
+        const decalGeom = new DecalGeometry(targetMesh, pos, orientation, size);
+        
+        // DecalGeometry is generated in world space. We inverse transform it so we can parent it to the target mesh.
+        decalGeom.applyMatrix4(targetMesh.matrixWorld.clone().invert());
+
+        // Clone the material and texture so future sticker edits don't mutate this placed sticker
+        const finalMat = mat.clone();
+        if (texture.image) {
+          const canvas = document.createElement("canvas");
+          canvas.width = texture.image.width;
+          canvas.height = texture.image.height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) ctx.drawImage(texture.image, 0, 0);
+          const { CanvasTexture } = await import("three");
+          const newTex = new CanvasTexture(canvas);
+          newTex.needsUpdate = true;
+          finalMat.map = newTex;
+        }
+
+        mesh = new Mesh(decalGeom, finalMat);
+        targetMesh.add(mesh);
+      }
+
+      mesh.userData._isDecal = true;
+      mesh.userData._isGhost = isGhost;
+      mesh.renderOrder = 999; // Render on top
+      mesh.raycast = () => null; // Disable raycasting completely for sticker meshes
+      return mesh;
+    } catch (e) {
+      console.warn("Sticker mesh build failed:", e);
+      return null;
+    }
+  }, [getScene]);
+
+
+  /** Dispose and remove a mesh from the scene */
+  const disposeMesh = useCallback((mesh: any) => {
+    if (!mesh) return;
+    mesh.geometry?.dispose();
+    mesh.material?.dispose();
+    if (mesh.parent) mesh.parent.remove(mesh);
+  }, []);
+
+  const ghostGenerationRef = useRef<number>(0);
+
+  /** Update or create ghost preview sticker on pointermove (React event handler) */
+  const handleOverlayPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!activeDecalConfig?.texture) return;
+    if (rafPendingRef.current) return;
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    rafPendingRef.current = true;
+    requestAnimationFrame(async () => {
+      rafPendingRef.current = false;
+      
+      // Temporarily hide ghost BEFORE hit test so it doesn't intercept the raycast
+      if (ghostDecalRef.current) {
+        ghostDecalRef.current.visible = false;
+      }
+      
+      const result = hitTestAt(clientX, clientY);
+      const scene = getScene();
+      if (!scene) return;
+      
+      // Now fully remove old ghost
+      if (ghostDecalRef.current) {
+        disposeMesh(ghostDecalRef.current);
+        ghostDecalRef.current = null;
+      }
+      if (!result) return;
+      
+      const currentGeneration = ++ghostGenerationRef.current;
+      
+      const mesh = await buildStickerMesh(
+        result.position,
+        result.normal,
+        activeDecalConfig.texture,
+        activeDecalConfig.scale,
+        activeDecalConfig.rotation,
+        activeDecalConfig.opacity,
+        true,
+      );
+      
+      if (currentGeneration !== ghostGenerationRef.current) {
+        // A newer ghost was requested while we were building this one. Discard to prevent orphaned meshes!
+        disposeMesh(mesh);
+        return;
+      }
+      
+      if (mesh) {
+        ghostDecalRef.current = mesh;
+        const el = viewerRef.current;
+        if (el) {
+          if (typeof el.queueRender === "function") el.queueRender();
+          // Force WebGL redraw hack to wake up the sleeping renderer
+          el.dispatchEvent(new CustomEvent("camera-change"));
+          const orig = el.exposure;
+          el.exposure = orig + 0.0001;
+          setTimeout(() => { if (el.exposure === orig + 0.0001) el.exposure = orig; }, 16);
+        }
+      }
+    });
+  }, [activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh]);
+
+  /** Confirm sticker placement on click (React event handler on the overlay div) */
+  const handleOverlayClick = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!activeDecalConfig?.texture) return;
+    
+    // Hide ghost BEFORE hit test so it doesn't intercept
+    if (ghostDecalRef.current) {
+      ghostDecalRef.current.visible = false;
+    }
+    
+    const result = hitTestAt(e.clientX, e.clientY);
+    if (!result) return;
+    const scene = getScene();
+    if (!scene) return;
+    
+    // Fully remove ghost
+    if (ghostDecalRef.current) {
+      disposeMesh(ghostDecalRef.current);
+      ghostDecalRef.current = null;
+    }
+    // Build confirmed sticker
+    const mesh = await buildStickerMesh(
+      result.position,
+      result.normal,
+      activeDecalConfig.texture,
+      activeDecalConfig.scale,
+      activeDecalConfig.rotation,
+      activeDecalConfig.opacity,
+      false,
+    );
+    if (!mesh) return;
+    const el = viewerRef.current;
+    if (el) {
+      if (typeof el.queueRender === "function") el.queueRender();
+      // Force WebGL redraw
+      el.dispatchEvent(new CustomEvent("camera-change"));
+      const orig = el.exposure;
+      el.exposure = orig + 0.0001;
+      setTimeout(() => { if (el.exposure === orig + 0.0001) el.exposure = orig; }, 16);
+    }
+    const newDecal: ConfirmedDecal = {
+      id: Math.random().toString(36).slice(2),
+      label: activeDecalConfig.label,
+      visible: true,
+      mesh,
+    };
+    setConfirmedDecals((prev) => [...prev, newDecal]);
+  }, [activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh]);
+
+  // Clean up ghost decal when leaving decal tab
+  useEffect(() => {
+    if (activeStudioTab !== "decalPlacer" && ghostDecalRef.current) {
+      disposeMesh(ghostDecalRef.current);
+      ghostDecalRef.current = null;
+    }
+  }, [activeStudioTab, disposeMesh]);
+
+  // Decal callbacks for MaterialEditPanel UI
+  const decalCallbacks: DecalCallbacks = {
+    onActiveConfigChange: (cfg) => setActiveDecalConfig(cfg),
+    onConfirm: () => { /* placement is handled by click */ },
+    onUndo: () => {
+      setConfirmedDecals((prev) => {
+        if (prev.length === 0) return prev;
+        const last = prev[prev.length - 1];
+        disposeMesh(last.mesh);
+        const el = viewerRef.current;
+        if (el && typeof el.queueRender === "function") el.queueRender();
+        return prev.slice(0, -1);
+      });
+    },
+    onClearAll: () => {
+      setConfirmedDecals((prev) => {
+        prev.forEach((d) => disposeMesh(d.mesh));
+        const el = viewerRef.current;
+        if (el && typeof el.queueRender === "function") el.queueRender();
+        return [];
+      });
+    },
+    onToggleDecalVisibility: (id) => {
+      setConfirmedDecals((prev) =>
+        prev.map((d) => {
+          if (d.id !== id) return d;
+          if (d.mesh) d.mesh.visible = !d.visible;
+          const el = viewerRef.current;
+          if (el && typeof el.queueRender === "function") el.queueRender();
+          return { ...d, visible: !d.visible };
+        })
+      );
+    },
+    onRemoveDecal: (id) => {
+      setConfirmedDecals((prev) => {
+        const target = prev.find((d) => d.id === id);
+        if (target) {
+          disposeMesh(target.mesh);
+          const el = viewerRef.current;
+          if (el && typeof el.queueRender === "function") el.queueRender();
+        }
+        return prev.filter((d) => d.id !== id);
+      });
+    },
+  };
+
+  const formatNumber = (num: number | undefined) => {
+    if (num === undefined || num === null || num === 0) return "N/A";
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + "k";
+    }
+    return num.toString();
+  };
+
+  const rawFaces = formatNumber(jobStatus?.raw_stats?.faces);
+  const rawVertices = formatNumber(jobStatus?.raw_stats?.vertices);
+  const refinedFaces = formatNumber(jobStatus?.refined_stats?.faces);
+  const refinedVertices = formatNumber(jobStatus?.refined_stats?.vertices);
+
+
+
   return (
-    <div className="min-h-[calc(100vh-3rem)] pt-14 pb-4 px-6">
-      <div className="max-w-7xl mx-auto h-[calc(100vh-7.5rem)] flex flex-col gap-2">
+    <div className="min-h-[calc(100vh-3rem)] pt-14 pb-4 px-6 md:px-8">
+      <div className="max-w-[1800px] mx-auto h-[calc(100vh-7.5rem)] flex flex-col gap-3">
         {/* Header */}
-        <div className="flex items-center justify-between shrink-0">
+        <div className="flex items-center justify-between shrink-0 mb-1">
           <div>
-            <h2 className="text-sm font-semibold text-foreground">Generation Complete</h2>
-            <p className="text-xs text-muted-foreground">
-              Two versions of your model — original colored mesh and RANSAC-refined geometry
+            <h2 className="text-lg font-bold text-foreground">Generation Complete</h2>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Pipeline finished — 3D Reconstruction verified and refined.
             </p>
           </div>
         </div>
 
-        {/* Dual viewer row */}
+        {/* 3-Panel Row */}
         <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
-          <ModelViewerPanel
-            title="Raw Colored Model"
-            subtitle="model_raw.glb • Original Tripo AI output"
-            src={`/api/download-raw/${jobId}`}
-            filename="model_raw.glb"
-            available={hasRaw}
-            unavailableReason="The raw colored model wasn't saved during this run. Try generating again — the Tripo upload may have timed out."
-            accentColor="oklch(0.65 0.18 30 / 0.8)"
-            stats={{ faces: "24.5k", vertices: "12.2k", type: "Organic / Unoptimized" }}
-          />
-          <ModelViewerPanel
-            title="Refined Geometry"
-            subtitle="model_refined.glb • RANSAC + Taubin smoothed"
-            src={`/api/download/${jobId}`}
-            filename="model_refined.glb"
-            available={hasRefined}
-            unavailableReason="The refined model was not produced by this run."
-            accentColor="oklch(0.70 0.20 200 / 0.8)"
-            stats={{ faces: "8.2k", vertices: "4.1k", type: "Hard-Surface planar / Decimated" }}
-          />
+
+          {/* Panel 1: Source Input */}
+          <div className="flex-shrink-0 lg:w-[240px] bg-tech-bg/40 backdrop-blur-md rounded-2xl border border-tech-border flex flex-col overflow-hidden shadow-xl">
+            <div className="px-4 py-3 border-b border-tech-border bg-black/10">
+              <span className="font-mono text-xs text-tech-fg font-bold uppercase tracking-widest">
+                Source Input
+              </span>
+            </div>
+            <div className="flex-1 flex flex-col items-center justify-center p-6 bg-grid-pattern overflow-y-auto">
+              {jobStatus?.input_type === "image" ? (
+                <div className="w-full flex flex-col gap-4">
+                  <div className="relative group rounded-xl overflow-hidden border border-white/5 shadow-2xl">
+                    <img
+                      src={`/api/inputs/${jobId}`}
+                      alt="Original Input"
+                      className="w-full h-auto object-contain max-h-[300px]"
+                    />
+                    <div className="absolute inset-0 bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                  <div className="bg-black/20 rounded-lg p-3 border border-white/5">
+                    <p className="text-[10px] uppercase text-tech-muted font-bold tracking-tighter mb-1">Method</p>
+                    <p className="text-xs font-mono text-primary">Image-to-Model Engine</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="animate-pulse text-tech-muted text-xs font-mono italic">Loading sequence...</div>
+              )}
+            </div>
+          </div>
+
+          {/* Panel 2: 3D Viewer */}
+          <LocalErrorBoundary fallbackTitle="3D Viewport Error">
+            <div className="relative flex-1 min-w-0 flex flex-col">
+              <ModelViewerPanel
+                title="Generated 3D Model"
+                subtitle="model_raw.glb • Textures & Mesh"
+                src={`/api/download-raw/${jobId}`}
+                refinedSrc={`/api/download/${jobId}`}
+                filename="model_raw.glb"
+                refinedFilename="model_refined.glb"
+                available={hasRaw}
+                refinedAvailable={hasRefined}
+                unavailableReason="Original textures missing."
+                accentColor="oklch(0.65 0.18 30 / 0.8)"
+                stats={{ faces: rawFaces, vertices: rawVertices, type: "PBR Asset" }}
+                viewerRef={viewerRef}
+                decalMode={activeStudioTab === "decalPlacer"}
+              />
+              {/* Transparent overlay that captures pointer events for decal placement.
+                  model-viewer's shadow DOM swallows pointer events, so we place this
+                  transparent div on TOP of the viewer to reliably capture clicks. */}
+              {activeStudioTab === "decalPlacer" && activeDecalConfig?.texture && (
+                <div
+                  className="absolute inset-0 z-20"
+                  style={{ cursor: "crosshair" }}
+                  onPointerMove={handleOverlayPointerMove}
+                  onClick={handleOverlayClick}
+                />
+              )}
+              {/* Floating sticker placement badge */}
+              {activeStudioTab === "decalPlacer" && activeDecalConfig?.texture && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-in fade-in duration-300">
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-black/70 backdrop-blur-md border border-primary/30 shadow-lg">
+                    <Stamp className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-[10px] font-mono text-primary font-semibold">
+                      Click to place sticker
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </LocalErrorBoundary>
+
+          {/* Panel 3: Material Studio */}
+          <div className="flex-shrink-0 lg:w-[300px] min-h-0">
+            <LocalErrorBoundary fallbackTitle="Material Studio Error">
+              <MaterialEditPanel
+                viewerRef={viewerRef}
+                decalCallbacks={decalCallbacks}
+                confirmedDecals={confirmedDecals}
+                activeDecalConfig={activeDecalConfig ?? undefined}
+                onActiveDecalConfigChange={(cfg) => {
+                  setActiveDecalConfig(cfg);
+                  setActiveStudioTab("decalPlacer");
+                }}
+                onTabChange={(tab) => setActiveStudioTab(tab)}
+              />
+            </LocalErrorBoundary>
+          </div>
+
+
         </div>
       </div>
     </div>

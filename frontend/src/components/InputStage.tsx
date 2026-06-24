@@ -1,10 +1,11 @@
 import { useState, useRef } from "react";
-import { Upload, Camera, Sparkles, ArrowRight } from "lucide-react";
+import { Upload, Camera, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
-type InputTab = "upload" | "camera" | "text";
+type InputTab = "upload" | "camera";
 
 interface InputStageProps {
   onGenerate: (jobId: string) => void;
@@ -12,9 +13,9 @@ interface InputStageProps {
 
 export function InputStage({ onGenerate }: InputStageProps) {
   const [activeTab, setActiveTab] = useState<InputTab>("upload");
-  const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [preprocess, setPreprocess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -22,7 +23,6 @@ export function InputStage({ onGenerate }: InputStageProps) {
   const tabs: { id: InputTab; label: string; icon: React.ReactNode }[] = [
     { id: "upload", label: "Upload Image", icon: <Upload className="w-4 h-4" /> },
     { id: "camera", label: "Use Camera", icon: <Camera className="w-4 h-4" /> },
-    { id: "text", label: "Text to 3D", icon: <Sparkles className="w-4 h-4" /> },
   ];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,26 +45,22 @@ export function InputStage({ onGenerate }: InputStageProps) {
   const handleGenerate = async () => {
     setError(null);
 
-    if (activeTab === "upload" || activeTab === "camera") {
-      if (!selectedFile) {
-        setError("Please select or capture an image first.");
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        const res = await fetch("/api/generate-3d", { method: "POST", body: formData });
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        const { job_id } = await res.json();
-        onGenerate(job_id);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to start generation.");
-        setIsLoading(false);
-      }
-    } else {
-      // text-to-3D: not yet wired to backend — placeholder
-      alert("Text-to-3D coming soon! Use the Upload tab for now.");
+    if (!selectedFile) {
+      setError("Please select or capture an image first.");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("preprocess", preprocess.toString());
+      const res = await fetch("/api/generate-3d", { method: "POST", body: formData });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const { job_id } = await res.json();
+      onGenerate(job_id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to start generation.");
+      setIsLoading(false);
     }
   };
 
@@ -77,7 +73,7 @@ export function InputStage({ onGenerate }: InputStageProps) {
           <span className="text-primary">3D Models.</span>
         </h1>
         <p className="mt-4 text-muted-foreground text-lg">
-          Upload an image, capture from camera, or describe what you need.
+          Upload an image or capture directly from camera.
         </p>
       </div>
 
@@ -165,21 +161,9 @@ export function InputStage({ onGenerate }: InputStageProps) {
               </p>
             </div>
           )}
-
-          {activeTab === "text" && (
-            <div className="space-y-4">
-              <Input
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder='Describe your 3D model (e.g., "A geometric coffee mug with a hexagonal handle")'
-                className="h-12 text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Be specific about geometry, proportions, and surface details for best results.
-              </p>
-            </div>
-          )}
         </div>
+
+
 
         {/* Error */}
         {error && (

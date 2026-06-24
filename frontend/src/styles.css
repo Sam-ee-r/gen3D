@@ -157,3 +157,82 @@
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
 }
+
+/* ─── Material Studio ─────────────────────────────────────────────────────── */
+
+/* Custom slider thumb */
+.studio-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, oklch(0.7 0.2 200));
+  border: 2px solid oklch(0.16 0.0 0);
+  box-shadow: 0 0 8px var(--accent, oklch(0.7 0.2 200 / 0.6));
+  cursor: pointer;
+  margin-top: -4px; /* Align vertically with center of 6px track */
+  transition: box-shadow 0.15s ease;
+}
+.studio-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, oklch(0.7 0.2 200));
+  border: 2px solid oklch(0.16 0.0 0);
+  box-shadow: 0 0 8px var(--accent, oklch(0.7 0.2 200 / 0.6));
+  cursor: pointer;
+}
+.studio-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 14px var(--accent, oklch(0.7 0.2 200 / 0.9));
+}
+.studio-slider::-webkit-slider-runnable-track {
+  background: rgba(255,255,255,0.08);
+  border-radius: 9999px;
+  height: 6px;
+}
+.studio-slider::-moz-range-track {
+  background: rgba(255,255,255,0.08);
+  border-radius: 9999px;
+  height: 6px;
+}
+
+/* Color picker — hide OS chrome, show a clean swatch */
+.color-picker-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.color-picker-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.color-picker-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 8px;
+}
+.color-picker-input::-moz-color-swatch {
+  border: none;
+  border-radius: 8px;
+}
+
+/* Thin scrollbar for panel */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 9999px;
+}
+

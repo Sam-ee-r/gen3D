@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from crewai import Agent, LLM
-from tools.tripo_tool import generate_3d_model, generate_3d_from_text
+from tools.tripo_tool import generate_3d_model
 from tools.vision_tool import analyze_image
 
 load_dotenv()

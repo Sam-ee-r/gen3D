@@ -79,10 +79,12 @@ def _curl(method, url, headers=None, files=None, json_data=None, output_file=Non
     return {}
 
 
-def smart_refine_geometry(file_path):
+def smart_refine_geometry(file_path, refinement_type: str = "Design"):
     """
-    Uses RANSAC to detect geometric primitives (planes/cylinders)
-    and flattens only the areas intended to be 'Hard Surface'.
+    Applies adaptive mesh refinement pipelines based on the refinement type.
+    - Mechanical: Sharp planes via aggressive RANSAC, minimal smoothing to preserve edges.
+    - Design: Hybrid approach with moderate RANSAC and medium Taubin smoothing for curves.
+    - Organic: No RANSAC plane snapping, using Laplacian smoothing for clean organic surfaces.
     """
     if not os.path.exists(file_path):
         return file_path
@@ -92,28 +94,61 @@ def smart_refine_geometry(file_path):
     if not mesh.has_vertices():
         return file_path
 
-    # 1. Plane Detection (RANSAC)
-    # Finds flat areas like the bottle top and gold ring
-    for _ in range(3):
-        try:
-            plane_model, inliers = mesh.segment_plane(distance_threshold=0.01,
-                                                     ransac_n=3,
-                                                     num_iterations=1000)
+    refinement_type = refinement_type.strip().capitalize()
+    print(f"🛠  Applying {refinement_type} Refinement Pipeline...")
 
-            if len(inliers) > 500:
-                vertices = np.asarray(mesh.vertices)
-                origin = -plane_model[3] * plane_model[:3]
-                normal = plane_model[:3]
-                for idx in inliers:
-                    v = vertices[idx]
-                    dist = np.dot(v - origin, normal)
-                    vertices[idx] = v - dist * normal
-                mesh.vertices = o3d.utility.Vector3dVector(vertices)
-        except Exception:
-            break
+    if refinement_type == "Mechanical":
+        # 1. Aggressive Plane Detection & Snapping (RANSAC)
+        # Snap flat areas strictly to mathematical planes
+        for _ in range(5):
+            try:
+                plane_model, inliers = mesh.segment_plane(distance_threshold=0.008,
+                                                         ransac_n=3,
+                                                         num_iterations=1500)
 
-    # 2. Taubin Smoothing
-    mesh = mesh.filter_smooth_taubin(number_of_iterations=20)
+                if len(inliers) > 300:
+                    vertices = np.asarray(mesh.vertices)
+                    origin = -plane_model[3] * plane_model[:3]
+                    normal = plane_model[:3]
+                    for idx in inliers:
+                        v = vertices[idx]
+                        dist = np.dot(v - origin, normal)
+                        vertices[idx] = v - dist * normal
+                    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+            except Exception:
+                break
+        
+        # 2. Light Taubin Smoothing (cleans high-frequency noise but preserves sharp edges/corners)
+        mesh = mesh.filter_smooth_taubin(number_of_iterations=8)
+
+    elif refinement_type == "Organic":
+        # 1. No RANSAC plane snapping for organic biological surfaces
+        # 2. Laplacian smoothing (excellent for characters, soft meshes, biological shapes)
+        mesh = mesh.filter_smooth_laplacian(number_of_iterations=10)
+
+    else: # "Design" (default/hybrid style for smooth consumer products)
+        # 1. Moderate Plane Snapping (only large structural planes)
+        for _ in range(2):
+            try:
+                plane_model, inliers = mesh.segment_plane(distance_threshold=0.012,
+                                                         ransac_n=3,
+                                                         num_iterations=1000)
+
+                if len(inliers) > 800:
+                    vertices = np.asarray(mesh.vertices)
+                    origin = -plane_model[3] * plane_model[:3]
+                    normal = plane_model[:3]
+                    for idx in inliers:
+                        v = vertices[idx]
+                        dist = np.dot(v - origin, normal)
+                        vertices[idx] = v - dist * normal
+                    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+            except Exception:
+                break
+
+        # 2. Strong Taubin Smoothing (removes AI surface noise but preserves organic volume curves)
+        mesh = mesh.filter_smooth_taubin(number_of_iterations=20)
+
     mesh.compute_vertex_normals()
 
     # Determine output path while preserving original format (.glb or .obj)
@@ -121,6 +156,19 @@ def smart_refine_geometry(file_path):
     refined_path = f"{base}_refined{ext}"
 
     o3d.io.write_triangle_mesh(refined_path, mesh)
+
+    # Copy materials and textures from the original GLB to the refined GLB
+    if ext.lower() == ".glb":
+        try:
+            import trimesh
+            raw_trimesh = trimesh.load(file_path, force='mesh')
+            refined_trimesh = trimesh.load(refined_path, force='mesh')
+            refined_trimesh.visual = raw_trimesh.visual
+            refined_trimesh.export(refined_path)
+            print("   ✅ Successfully preserved original texture on refined GLB.")
+        except Exception as e:
+            print(f"   ⚠️ Failed to copy texture visual map: {e}")
+
     return refined_path
 
 
@@ -145,12 +193,11 @@ def make_named_folder(base_dir: str, label: str) -> tuple:
         counter += 1
 
 
-def _poll_and_download(task_id: str, headers: dict, folder_name: str = "object_1") -> str:
-    """Polls Tripo until the task completes, then downloads and refines the mesh."""
-    print(f"🔄 Processing 3D Model (Task ID: {task_id})...")
-    max_attempts = 60
-    model_url = None
-
+def _poll_task_status(task_id: str, headers: dict, task_name: str = "3D Model") -> str:
+    """Polls a specific Tripo task until it succeeds, returning the model URL."""
+    print(f"🔄 Polling {task_name} (Task ID: {task_id})...")
+    max_attempts = 120  # increased to 10 minutes because Refinement is heavy
+    
     for attempt in range(max_attempts):
         try:
             status_url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
@@ -159,54 +206,68 @@ def _poll_and_download(task_id: str, headers: dict, folder_name: str = "object_1
 
             if status == "success":
                 output = status_resp["data"].get("output", {})
-                print(f"   ✅ Task succeeded. Output keys: {list(output.keys())}")
+                print(f"   ✅ {task_name} succeeded.")
+                # We prioritize the pbr_model (High-res texture mesh) over the base model
                 model_url = (
-                    output.get("model") or
                     output.get("pbr_model") or
+                    output.get("model") or
                     output.get("rendered_image") or
                     next(iter(output.values()), None)
                 )
                 if not model_url:
-                    return f"Error: Task succeeded but no model URL found. Output: {output}"
-                break
+                    raise Exception(f"Task succeeded but no model URL found in {output}")
+                return model_url
             elif status == "failed":
-                return "Tripo AI generation failed."
+                raise Exception(f"{task_name} failed on Tripo servers.")
 
             print(f"   Attempt {attempt + 1}/{max_attempts} — status: {status}")
             time.sleep(5)
         except Exception as e:
-            print(f"   Polling error: {str(e)}. Retrying...")
+            if "failed" in str(e).lower() or "no model url" in str(e).lower():
+                raise e
+            print(f"   Polling API error: {str(e)}. Retrying...")
             time.sleep(5)
 
-    if not model_url:
-        return "Error: Timed out waiting for Tripo AI."
+    raise Exception(f"Timed out waiting for {task_name}.")
 
-    # Use the pre-computed folder_name so inputs/ and outputs/ always match
+
+def _download_model_directly(task_id: str, headers: dict, folder_name: str, refinement_type: str = "Design") -> str:
+    """
+    Waits for the V3.1 model generation to finish and downloads it.
+    Applies adaptive geometric refinement.
+    """
+    try:
+        final_model_url = _poll_task_status(task_id, headers, "V3.1 Generation")
+    except Exception as e:
+        return f"Generation error: {str(e)}"
+
     output_dir = os.path.join("./outputs", folder_name)
     os.makedirs(output_dir, exist_ok=True)
-    print(f"📁 Output folder: {output_dir}")
+    print(f"\n📁 Output folder: {output_dir}")
 
-    ext = os.path.splitext(model_url.split("?")[0])[-1] or ".glb"
+    ext = os.path.splitext(final_model_url.split("?")[0])[-1] or ".glb"
     raw_file_path = os.path.join(output_dir, f"raw{ext}")
 
     try:
-        _curl("GET", model_url, output_file=raw_file_path)
+        _curl("GET", final_model_url, output_file=raw_file_path)
     except Exception as e:
-        return f"Download error: {str(e)}"
+        return f"File download error: {str(e)}"
 
-    print("✨ Applying Smart CAD Refinement...")
-    final_path = smart_refine_geometry(raw_file_path)
+    print(f"✨ Applying Smart {refinement_type} Refinement to V3.1 Mesh...")
+    final_path = smart_refine_geometry(raw_file_path, refinement_type)
     return f"Success: Raw model saved at {raw_file_path} | Refined model saved at {final_path}"
 
 
 @tool("generate_3d_model")
-def generate_3d_model(image_paths: list, object_label: str = "object"):
+def generate_3d_model(image_paths: list, object_label: str = "object", preprocess: bool = False, refinement_type: str = "Design"):
     """
     Generates a 3D model from a local image file using Tripo AI (image_to_model).
-    Applies local background removal and centering before uploading.
+    Applies local background removal and centering before uploading if preprocess is True.
     Input: list of local image file paths — only the first image is used.
     Optional object_label: short 1-2 word name (e.g. 'orange powerbank').
       Used to create matching, numbered inputs/ and outputs/ folders.
+    Optional preprocess: boolean flag to enable or disable background removal.
+    Optional refinement_type: the type of geometry refinement to run: 'Mechanical', 'Design', or 'Organic'.
     Returns the path to the refined 3D mesh file.
     """
     import shutil
@@ -238,7 +299,11 @@ def generate_3d_model(image_paths: list, object_label: str = "object"):
     # ------------------------------------------------------------------
     preprocessed_dest = os.path.join(input_folder, "preprocessed.png")
     try:
-        preprocessed_path = preprocess_image(primary_image, preprocessed_dest)
+        if preprocess:
+            preprocessed_path = preprocess_image(primary_image, preprocessed_dest)
+        else:
+            print("   ℹ️  Preprocessing (background removal) disabled by user request.")
+            preprocessed_path = primary_image
     except Exception as e:
         print(f"   ⚠️  Pre-processing failed ({e}), falling back to original image.")
         preprocessed_path = primary_image
@@ -260,9 +325,10 @@ def generate_3d_model(image_paths: list, object_label: str = "object"):
     task_payload = {
         "type": "image_to_model",
         "file": {"type": "png", "file_token": image_token},
-        "model_version": "v2.5-20250123",        # Upgraded to newest WebApp model
+        "model_version": "v3.1-20260211",        # Upgraded to high-fidelity V3.1 model
         "texture_alignment": "original_image",   # Forces texture to perfectly match the photo view
-        "enable_image_autofix": True
+        "enable_image_autofix": True,
+        "face_limit": 100000                     # Requested higher face count
     }
 
     try:
@@ -273,51 +339,6 @@ def generate_3d_model(image_paths: list, object_label: str = "object"):
     except Exception as e:
         return f"Task creation error: {str(e)}"
 
-    # Pass the exact folder_name so outputs/ folder matches inputs/ folder
-    return _poll_and_download(task_id, headers, folder_name=folder_name)
+    # Launch Single-Pass V3.1 pipeline with adaptive refinement
+    return _download_model_directly(task_id, headers, folder_name, refinement_type)
 
-
-@tool("generate_3d_from_text")
-def generate_3d_from_text(description: str):
-    """
-    USE THIS TOOL to generate a 3D model from the geometric text description
-    produced by the analyze_image tool. Sends the description as a concise text
-    prompt to Tripo AI (text_to_model) and returns the path to the refined 3D mesh.
-    Input: the full geometric description string from the Director agent.
-    """
-    api_key = os.getenv("TRIPO_API_KEY")
-    if not api_key:
-        return "Error: TRIPO_API_KEY not found in environment."
-
-    # Tripo's text_to_model has a ~500 char prompt limit.
-    # Strip markdown symbols and compress to a clean, concise prompt.
-    import re
-    clean = re.sub(r"[#*`\-]+", "", description)
-    clean = re.sub(r"\n+", " ", clean).strip()
-    clean = re.sub(r"\s{2,}", " ", clean)
-    prompt = clean[:500]
-
-    # Extract a short label from the first sentence for the folder name
-    # e.g. "A cyan blue star-shaped hair clip." → "cyan-blue-star-shaped-hair-clip"
-    first_sentence = re.split(r"[.\n]", clean)[0].strip()
-    slug = re.sub(r"[^a-z0-9]+", "-", first_sentence.lower())[:40].strip("-")
-    label = slug if slug else "object"
-
-    print(f"📝 Sending prompt to Tripo ({len(prompt)} chars): {prompt[:80]}...")
-    print(f"📁 Will save as: {label}")
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-    task_url = "https://api.tripo3d.ai/v2/openapi/task"
-    task_payload = {
-        "type": "text_to_model",
-        "prompt": prompt
-    }
-    try:
-        task_resp = _curl("POST", task_url, headers=headers, json_data=task_payload)
-        if "data" not in task_resp:
-            return f"Tripo API Error: {task_resp.get('message', 'Unknown error')} (Code: {task_resp.get('code')})"
-        task_id = task_resp["data"]["task_id"]
-    except Exception as e:
-        return f"Task creation error: {str(e)}"
-
-    return _poll_and_download(task_id, headers, label=label)

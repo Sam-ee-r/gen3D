@@ -3,7 +3,7 @@ import ssl
 import uuid
 import threading
 import re
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -34,12 +34,14 @@ app.add_middleware(
 jobs: dict[str, dict] = {}
 
 
-def run_pipeline(job_id: str, image_path: str):
+def run_pipeline(job_id: str, image_path: str, preprocess: bool = False):
     """Run the full CrewAI pipeline in a background thread."""
     from crewai import Crew, Task, Process
     from agents import create_agents
 
     job = jobs[job_id]
+    job["input_type"] = "image"
+    job["input_value"] = image_path
     try:
         job.update(status="processing", step="Vision Analysis...", progress=8)
 
@@ -73,6 +75,8 @@ def run_pipeline(job_id: str, image_path: str):
                 f"as the 'image_paths' parameter to the tool. "
                 f"CRITICAL: From the Director's brief, extract the short 1-2 word object label "
                 f"(e.g. 'orange powerbank') and pass it as the 'object_label' parameter to the tool. "
+                f"CRITICAL: Pass the boolean value {preprocess} as the 'preprocess' parameter to the tool. "
+                f"CRITICAL: From the Director's brief, extract the recommended refinement type ('Mechanical', 'Design', or 'Organic') and pass it as the 'refinement_type' parameter to the tool. "
                 "Return the file path of the resulting refined 3D mesh."
             ),
             expected_output="The string path to the generated 3D file, or a clear error message if the tool fails.",
@@ -94,24 +98,55 @@ def run_pipeline(job_id: str, image_path: str):
         job.update(step="Finalizing Geometry...", progress=90)
 
         # The agent returns only the refined path in its final answer.
-        # Find any .glb path ending in _refined.glb from the result.
-        refined_match = re.search(r"(\./outputs/[^\s'\"|\]]+_refined\.glb)", result_str)
+        # Find any .glb path ending in _refined.glb from the result. Allow spaces just in case.
+        refined_match = re.search(r"(\./outputs/[^'\"|\]]+_refined\.glb)", result_str)
         refined_path = refined_match.group(1).strip().rstrip(".,)") if refined_match else None
 
-        # Fallback: grab any .glb path if refined pattern not found
-        if not refined_path:
-            any_match = re.search(r"(\./outputs/[^\s'\"|\]]+\.glb)", result_str)
+        if not refined_path or not os.path.exists(refined_path):
+            any_match = re.search(r"(\./outputs/[^'\"|\]]+\.glb)", result_str)
             if any_match:
                 refined_path = any_match.group(1).strip().rstrip(".,)")
+
+        # FOOLPROOF FALLBACK: if the AI hallucinates entirely, just grab the most recently updated folder in outputs/
+        if not refined_path or not os.path.exists(refined_path):
+            try:
+                base_dir = "./outputs"
+                all_folders = [os.path.join(base_dir, d) for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+                if all_folders:
+                    latest_folder = max(all_folders, key=os.path.getmtime)
+                    possible_path = os.path.join(latest_folder, "raw_refined.glb")
+                    if os.path.exists(possible_path):
+                        refined_path = possible_path
+            except Exception:
+                pass
 
         if refined_path and os.path.exists(refined_path):
             # Derive the raw path from the same folder (raw.glb is always downloaded first)
             raw_path = os.path.join(os.path.dirname(refined_path), "raw.glb")
-            if not os.path.exists(raw_path):
+            if not raw_path or not os.path.exists(raw_path):
                 # Try .glb variant from Tripo (e.g. raw.glb may have a different ext)
                 folder = os.path.dirname(refined_path)
                 candidates = [f for f in os.listdir(folder) if f.startswith("raw") and not f.endswith("_refined.glb")]
                 raw_path = os.path.join(folder, candidates[0]) if candidates else None
+
+            # Calculate actual face and vertex counts
+            raw_stats = {"faces": 0, "vertices": 0}
+            if raw_path and os.path.exists(raw_path):
+                try:
+                    import trimesh
+                    raw_mesh = trimesh.load(raw_path, force='mesh')
+                    raw_stats = {"faces": len(raw_mesh.faces), "vertices": len(raw_mesh.vertices)}
+                except Exception as e:
+                    print(f"Error calculating raw stats: {e}")
+
+            refined_stats = {"faces": 0, "vertices": 0}
+            if refined_path and os.path.exists(refined_path):
+                try:
+                    import trimesh
+                    refined_mesh = trimesh.load(refined_path, force='mesh')
+                    refined_stats = {"faces": len(refined_mesh.faces), "vertices": len(refined_mesh.vertices)}
+                except Exception as e:
+                    print(f"Error calculating refined stats: {e}")
 
             job.update(
                 status="complete",
@@ -119,6 +154,8 @@ def run_pipeline(job_id: str, image_path: str):
                 progress=100,
                 model_path=refined_path,
                 raw_model_path=raw_path if raw_path and os.path.exists(raw_path) else None,
+                raw_stats=raw_stats,
+                refined_stats=refined_stats,
             )
         else:
             job.update(status="failed", error=f"Could not find .glb paths in result: {result_str[:300]}")
@@ -127,12 +164,15 @@ def run_pipeline(job_id: str, image_path: str):
         job.update(status="failed", step="Error", error=str(e))
 
 
+
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @app.post("/api/generate-3d")
-async def generate_3d(file: UploadFile = File(...)):
+async def generate_3d(file: UploadFile = File(...), preprocess: bool = Form(False)):
     """Accept an image upload, start the pipeline, return a job_id."""
     job_id = str(uuid.uuid4())
 
@@ -147,13 +187,32 @@ async def generate_3d(file: UploadFile = File(...)):
         "progress": 0,
         "model_path": None,
         "raw_model_path": None,
+        "raw_stats": None,
+        "refined_stats": None,
+        "input_type": None,
+        "input_value": None,
         "error": None,
     }
 
-    thread = threading.Thread(target=run_pipeline, args=(job_id, image_path), daemon=True)
+    thread = threading.Thread(target=run_pipeline, args=(job_id, image_path, preprocess), daemon=True)
     thread.start()
 
     return {"job_id": job_id}
+
+
+
+
+
+@app.get("/api/inputs/{job_id}")
+async def get_input_image(job_id: str):
+    """Serve the original input image for a job."""
+    image_path = f"./inputs/{job_id}.jpg"
+    if not os.path.exists(image_path):
+        # Check if it's in a subfolder (named folder system)
+        # However, the original upload is always stored at ./inputs/{job_id}.jpg by /api/generate-3d
+        raise HTTPException(status_code=404, detail="Input image not found")
+    
+    return FileResponse(image_path)
 
 
 @app.get("/api/status/{job_id}")

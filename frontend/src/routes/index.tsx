@@ -21,8 +21,8 @@ export const Route = createFileRoute("/")(({
 type AppStage = "input" | "processing" | "review";
 
 function Index() {
-  const [stage, setStage] = useState<AppStage>("input");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [stage, setStage] = useState<AppStage>("review");
+  const [jobId, setJobId] = useState<string | null>("test");
 
   const handleGenerate = useCallback((id: string) => {
     setJobId(id);
