@@ -467,20 +467,12 @@ export function MaterialEditPanel({
     ctx.fillText(textContent || " ", W / 2, H / 2);
 
     // Create or update the THREE.CanvasTexture
-    // We dynamically import Three to keep the panel dependency-light
+    // Always create a new texture so WebGL buffer resizes correctly when switching between image and text modes
     import("three").then(({ CanvasTexture }) => {
-      if (activeTextureRef.current && activeTextureRef.current._isCanvasTexture) {
-        // Update the existing texture in-place
-        activeTextureRef.current.image = canvas; // Ensure it points to the active canvas element
-        activeTextureRef.current._aspectRatio = W / H;
-        activeTextureRef.current.needsUpdate = true;
-        notifyDecalConfig(activeTextureRef.current, textContent || "Text", decalScale, decalRotation, decalOpacity);
-      } else {
-        const tex = new CanvasTexture(canvas);
-        (tex as any)._isCanvasTexture = true;
-        (tex as any)._aspectRatio = W / H;
-        notifyDecalConfig(tex, textContent || "Text", decalScale, decalRotation, decalOpacity);
-      }
+      const tex = new CanvasTexture(canvas);
+      (tex as any)._isCanvasTexture = true;
+      (tex as any)._aspectRatio = W / H;
+      notifyDecalConfig(tex, textContent || "Text", decalScale, decalRotation, decalOpacity);
     }).catch(() => {});
   }, [textContent, textFont, textColor, notifyDecalConfig, decalScale, decalRotation, decalOpacity]);
 
@@ -513,17 +505,10 @@ export function MaterialEditPanel({
       ctx.drawImage(img, 0, 0, W, H);
 
       import("three").then(({ CanvasTexture }) => {
-        if (activeTextureRef.current && activeTextureRef.current._isCanvasTexture) {
-          activeTextureRef.current.image = canvas;
-          activeTextureRef.current._aspectRatio = W / H;
-          activeTextureRef.current.needsUpdate = true;
-          notifyDecalConfig(activeTextureRef.current, uploadedImageFile?.name || "Image", decalScale, decalRotation, decalOpacity);
-        } else {
-          const tex = new CanvasTexture(canvas);
-          (tex as any)._isCanvasTexture = true;
-          (tex as any)._aspectRatio = W / H;
-          notifyDecalConfig(tex, uploadedImageFile?.name || "Image", decalScale, decalRotation, decalOpacity);
-        }
+        const tex = new CanvasTexture(canvas);
+        (tex as any)._isCanvasTexture = true;
+        (tex as any)._aspectRatio = W / H;
+        notifyDecalConfig(tex, uploadedImageFile?.name || "Image", decalScale, decalRotation, decalOpacity);
       }).catch(() => {});
     };
     img.src = imageUrl;

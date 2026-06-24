@@ -716,33 +716,24 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
         polygonOffsetUnits: -10,
       });
 
+      const depth = Math.max(w, h) * 2;
+      const size = new Vector3(w, h, depth);
+      
+      const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
+      const decalGeom = new DecalGeometry(targetMesh, pos, orientation, size);
+      
+      // DecalGeometry is generated in world space. Inverse transform it so we can parent it directly to targetMesh.
+      decalGeom.applyMatrix4(targetMesh.matrixWorld.clone().invert());
+
       let mesh: any;
 
       if (isGhost) {
-        // Fast path for real-time hover: PlaneGeometry
-        const geom = new PlaneGeometry(w, h);
-        mat.side = DoubleSide;
-        mesh = new Mesh(geom, mat);
-        const offset = nrm.clone().multiplyScalar(0.001);
-        mesh.position.copy(pos.clone().add(offset));
-        mesh.lookAt(pos.clone().add(nrm));
-        mesh.rotateZ((rotationDeg * Math.PI) / 180);
-        
-        // Critical: Update the world matrix before attaching so attach computes the correct local transform!
-        mesh.updateMatrixWorld(true);
-        // Attach directly to the root scene to avoid nested transform staleness, while preserving world position
-        scene.attach(mesh);
+        // Ghost sticker preview uses the same DecalGeometry so it perfectly matches the final placement
+        mat.depthWrite = false;
+        mesh = new Mesh(decalGeom, mat);
+        targetMesh.add(mesh);
       } else {
-        // High quality path for placed stickers: DecalGeometry
-        const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
-        const depth = Math.max(w, h) * 2;
-        const size = new Vector3(w, h, depth);
-        const decalGeom = new DecalGeometry(targetMesh, pos, orientation, size);
-        
-        // DecalGeometry is generated in world space. We inverse transform it so we can parent it to the target mesh.
-        decalGeom.applyMatrix4(targetMesh.matrixWorld.clone().invert());
-
-        // Clone the material and texture so future sticker edits don't mutate this placed sticker
+        // High quality path for placed stickers: clone material and texture
         const finalMat = mat.clone();
         if (texture.image) {
           const canvas = document.createElement("canvas");
