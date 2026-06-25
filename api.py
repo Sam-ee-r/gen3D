@@ -180,7 +180,6 @@ def run_pipeline(job_id: str, image_path: str, preprocess: bool = False):
             except Exception as e:
                 print(f"Error extracting object label via LLM: {e}")
                 try:
-                    import re
                     match = re.search(
                         r"(?:object\s+)?label\s*:\s*['\"#]?([a-zA-Z0-9\s_-]{2,30})",
                         brief,
