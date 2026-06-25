@@ -6,7 +6,15 @@ from tools.vision_tool import analyze_image
 
 import litellm
 
-litellm.drop_params = True
+_original_completion = litellm.completion
+def _patched_completion(*args, **kwargs):
+    if "messages" in kwargs:
+        for msg in kwargs["messages"]:
+            if "cache_breakpoint" in msg:
+                del msg["cache_breakpoint"]
+    return _original_completion(*args, **kwargs)
+litellm.completion = _patched_completion
+
 load_dotenv()
 
 # Groq Llama 4 Scout — multimodal, handles both vision tool and agent reasoning
