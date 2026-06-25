@@ -32,12 +32,10 @@ export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderPro
       <header className="fixed top-0 left-0 right-0 z-50 bg-background/60 backdrop-blur-xl border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.5)] font-mono">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
           {/* Logo Brand */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Box className="w-4 h-4 text-primary-foreground" />
-            </div>
-            <span className="text-base sm:text-lg font-semibold tracking-tight text-foreground font-display">
-              MeshRefine AI
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Polyfy Logo" className="h-7 w-auto object-contain" />
+            <span className="text-base sm:text-lg font-bold tracking-tight text-foreground font-display select-none">
+              Polyfy
             </span>
           </div>
 

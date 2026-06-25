@@ -8,7 +8,7 @@ interface LogEntry {
 }
 
 const INITIAL_LOGS: LogEntry[] = [
-  { type: "system", text: "> MeshRefine v2.1 initialized." },
+  { type: "system", text: "> Polyfy v1.0 initialized." },
   { type: "system", text: "> Base mesh generated (12,847 faces)." },
   { type: "system", text: "> RANSAC planes detected: 6 surfaces flattened." },
   { type: "system", text: "> Topology optimized. Ready for refinement." },

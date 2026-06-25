@@ -11,10 +11,10 @@ export const Route = createFileRoute("/")({
   component: Index,
   head: () => ({
     meta: [
-      { title: "MeshRefine AI — Generate Production-Ready 3D Models" },
-      { name: "description", content: "AI-powered 3D model generation and refinement workflow. Upload, generate, and refine meshes interactively." },
-      { property: "og:title", content: "MeshRefine AI — Generate Production-Ready 3D Models" },
-      { property: "og:description", content: "AI-powered 3D model generation and refinement workflow." },
+      { title: "Polyfy — Convert Photos to 3D Models" },
+      { name: "description", content: "Convert any 2D photo into a customizable textured 3D polygon model instantly using Polyfy's AI pipeline." },
+      { property: "og:title", content: "Polyfy — Convert Photos to 3D Models" },
+      { property: "og:description", content: "Convert any 2D photo into a customizable textured 3D polygon model instantly using Polyfy's AI pipeline." },
     ],
   }),
 });

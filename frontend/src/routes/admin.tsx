@@ -6,7 +6,7 @@ import { AdminCurationDashboard } from "@/components/AdminCurationDashboard";
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
   head: () => ({
-    meta: [{ title: "Admin — MeshRefine AI" }],
+    meta: [{ title: "Admin — Polyfy" }],
   }),
 });
 
