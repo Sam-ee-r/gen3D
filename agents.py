@@ -4,6 +4,9 @@ from crewai import Agent, LLM
 from tools.tripo_tool import generate_3d_model
 from tools.vision_tool import analyze_image
 
+import litellm
+
+litellm.drop_params = True
 load_dotenv()
 
 # Groq Llama 4 Scout — multimodal, handles both vision tool and agent reasoning
