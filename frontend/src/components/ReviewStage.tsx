@@ -667,6 +667,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
     if (!jobId) return;
 
     let active = true;
+    let timer: NodeJS.Timeout;
 
     // Reset states
     setShowReviewModal(false);
@@ -686,12 +687,16 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
           setHasReviewed(true);
           setHasDismissedReview(true); // show the floating button
         } else {
-          setShowReviewModal(true); // pop up review modal automatically
+          // Delay the popup by 5 seconds so user can see their model first
+          timer = setTimeout(() => {
+            if (active) setShowReviewModal(true);
+          }, 5000);
         }
       });
 
     return () => {
       active = false;
+      if (timer) clearTimeout(timer);
     };
   }, [jobId]);
 
