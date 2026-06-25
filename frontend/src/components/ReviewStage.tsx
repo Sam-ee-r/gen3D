@@ -1069,6 +1069,8 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       const hit = hitTestAt(e.clientX, e.clientY);
       if (hit) {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         const delta = e.deltaY > 0 ? 15 : -15;
         el.dispatchEvent(new CustomEvent("decal-rotate", { detail: { delta } }));
         
@@ -1087,13 +1089,13 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
     el.addEventListener("pointerdown", onPointerDown);
     el.addEventListener("pointermove", onPointerMove);
     el.addEventListener("pointerup", onPointerUp);
-    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
 
     return () => {
       el.removeEventListener("pointerdown", onPointerDown);
       el.removeEventListener("pointermove", onPointerMove);
       el.removeEventListener("pointerup", onPointerUp);
-      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("wheel", onWheel, { capture: true });
     };
   }, [activeStudioTab, activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh, placeStickerAt]);
 
