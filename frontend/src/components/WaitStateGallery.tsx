@@ -82,7 +82,7 @@ export function WaitStateGallery() {
             )}
 
             {/* 2. 3D model viewer (Middle) */}
-            <div className="flex-1 h-64 md:h-auto md:min-h-[180px] bg-black/10 relative">
+            <div className="w-full h-64 md:flex-1 md:h-auto md:min-h-[180px] bg-black/10 relative">
               {c.raw_glb_url || c.glb_model_url ? (
                 <model-viewer
                   src={c.raw_glb_url ?? c.glb_model_url}
