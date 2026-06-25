@@ -411,6 +411,7 @@ export function MaterialEditPanel({
   // Concept 1: The Recipe Stack color layers state
   const [layers, setLayers] = useState<ColorSwapLayer[]>([]);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+  const [pickingColorForLayerId, setPickingColorForLayerId] = useState<string | null>(null);
 
   // Text sticker mode
   const [textContent, setTextContent] = useState<string>("HELLO");
@@ -607,6 +608,180 @@ export function MaterialEditPanel({
     el.addEventListener("decal-rotate", onRotate);
     return () => el.removeEventListener("decal-rotate", onRotate);
   }, [viewerRef]);
+  
+  // Custom 3D eyedropper color picker listener
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el || !pickingColorForLayerId) return;
+
+    // Change cursor to crosshair
+    const originalCursor = el.style.cursor;
+    el.style.cursor = "crosshair";
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    const onPointerDown = (e: PointerEvent) => {
+      isDragging = false;
+      startX = e.clientX;
+      startY = e.clientY;
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) {
+        isDragging = true;
+      }
+    };
+
+    const onPointerUp = async (e: PointerEvent) => {
+      // If the user was dragging/orbiting the camera, don't trigger color picking
+      if (isDragging) return;
+
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+
+      if (typeof el.positionAndNormalFromPoint !== "function") return;
+      const hit = el.positionAndNormalFromPoint(clientX, clientY);
+      if (!hit) return;
+
+      const { position, normal } = hit;
+
+      try {
+        const { Vector3, Raycaster } = await import("three");
+        
+        const symbols = Object.getOwnPropertySymbols(el);
+        const sceneSymbol = symbols.find((s) => s.description === "scene");
+        if (!sceneSymbol) return;
+        const scene = (el as any)[sceneSymbol];
+        if (!scene) return;
+
+        const pos = new Vector3(position.x, position.y, position.z);
+        const nrm = new Vector3(normal.x, normal.y, normal.z).normalize();
+
+        // Transform model coordinates to world coordinates
+        if (scene.target && scene.target.matrixWorld) {
+          pos.applyMatrix4(scene.target.matrixWorld);
+          nrm.transformDirection(scene.target.matrixWorld).normalize();
+        }
+
+        // Raycast to find the exact clicked mesh and face
+        const rayOrigin = pos.clone().add(nrm.clone().multiplyScalar(0.01));
+        const rayDirection = nrm.clone().multiplyScalar(-1);
+        const raycaster = new Raycaster(rayOrigin, rayDirection);
+
+        const meshes: any[] = [];
+        scene.traverse((child: any) => {
+          if (child.isMesh && child.visible) {
+            meshes.push(child);
+          }
+        });
+
+        const intersects = raycaster.intersectObjects(meshes, true);
+        if (intersects.length === 0) return;
+
+        const intersect = intersects[0];
+        const clickedMesh = intersect.object;
+        const uuid = clickedMesh.uuid;
+
+        // Auto-initialize backup if not already present
+        if (!meshBackups.current.has(uuid)) {
+          const child = clickedMesh as any;
+          if (child.material?.map?.image) {
+            const img = child.material.map.image;
+            const isAllowed = img && (
+              img instanceof HTMLImageElement ||
+              img instanceof HTMLCanvasElement ||
+              (typeof ImageBitmap !== "undefined" && img instanceof ImageBitmap) ||
+              (typeof OffscreenCanvas !== "undefined" && img instanceof OffscreenCanvas)
+            );
+            if (isAllowed) {
+              const canvas = document.createElement("canvas");
+              canvas.width = img.width || 1024;
+              canvas.height = img.height || 1024;
+              const ctx = canvas.getContext("2d");
+              if (ctx) {
+                ctx.drawImage(img, 0, 0);
+                meshBackups.current.set(uuid, {
+                  type: "texture",
+                  imageData: canvas,
+                });
+              }
+            }
+          } else if (child.geometry?.attributes?.color) {
+            const colorAttr = child.geometry.attributes.color;
+            meshBackups.current.set(uuid, {
+              type: "vertex",
+              vertexColors: new Float32Array(colorAttr.array),
+            });
+          }
+        }
+
+        const backup = meshBackups.current.get(uuid);
+        if (!backup) return;
+
+        let r = 255, g = 255, b = 255;
+        if (backup.type === "texture" && backup.imageData && intersect.uv) {
+          const uv = intersect.uv;
+          const x = Math.floor(uv.x * backup.imageData.width);
+          const y = Math.floor((1 - uv.y) * backup.imageData.height); // Flip Y coordinate
+
+          const ctx = backup.imageData.getContext("2d");
+          if (ctx) {
+            const pixel = ctx.getImageData(
+              Math.max(0, Math.min(backup.imageData.width - 1, x)),
+              Math.max(0, Math.min(backup.imageData.height - 1, y)),
+              1,
+              1
+            ).data;
+            r = pixel[0];
+            g = pixel[1];
+            b = pixel[2];
+          }
+        } else if (backup.type === "vertex" && backup.vertexColors && intersect.face) {
+          const geom = (clickedMesh as any).geometry;
+          const colorAttr = geom.attributes.color;
+          if (colorAttr) {
+            const face = intersect.face;
+            r = Math.round(colorAttr.getX(face.a) * 255);
+            g = Math.round(colorAttr.getY(face.a) * 255);
+            b = Math.round(colorAttr.getZ(face.a) * 255);
+          }
+        }
+
+        // Convert RGB to HEX
+        const toHex = (c: number) => Math.round(c).toString(16).padStart(2, "0");
+        const hex = `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+
+        // Update the active swap layer
+        setLayers((prev) => {
+          const next = prev.map((l) =>
+            l.id === pickingColorForLayerId
+              ? { ...l, hexTargetColor: hex, targetColor: [r, g, b] as [number, number, number] }
+              : l
+          );
+          compileLayers(next);
+          return next;
+        });
+
+        // Done picking
+        setPickingColorForLayerId(null);
+      } catch (err) {
+        console.error("Eyedropper color picking failed:", err);
+      }
+    };
+
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+
+    return () => {
+      el.style.cursor = originalCursor;
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [viewerRef, pickingColorForLayerId, compileLayers]);
 
 
   // ── Load all materials list from current model ──────────────────────────────
@@ -1255,9 +1430,24 @@ export function MaterialEditPanel({
           </div>
         )}
 
-        {/* ──────── TAB 1: COLOR CHANGER (THE RECIPE STACK) ──────── */}
         {activeStudioTab === "colorChanger" && (
           <div className="flex-1 flex flex-col p-4 gap-3">
+            {pickingColorForLayerId && (
+              <div className="lg:hidden flex items-center gap-2 p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-primary animate-in fade-in duration-300 text-[10px] font-mono mb-2">
+                <Pipette className="w-4 h-4 flex-shrink-0 animate-bounce" />
+                <div className="flex-1 leading-normal">
+                  Click on the 3D model in the viewport to sample the target color.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPickingColorForLayerId(null)}
+                  className="px-2 py-0.5 rounded bg-primary/20 hover:bg-primary/30 text-[9px] uppercase font-semibold text-primary transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            
             {layers.length > 0 ? (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between text-[9px] font-mono text-tech-muted uppercase tracking-wider px-1">
@@ -1310,29 +1500,48 @@ export function MaterialEditPanel({
                           {/* Swatches compare row */}
                           <div className="flex items-center gap-3">
                             {/* Target Color Selector */}
-                            <input
-                              type="color"
-                              value={layer.hexTargetColor}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveLayerId(layer.id);
-                              }}
-                              onChange={(e) => {
-                                const hex = e.target.value;
-                                const rgb = hexToRgb(hex).map((c) => Math.round(c * 255)) as [number, number, number];
-                                setLayers((prev) => {
-                                  const next = prev.map((l) =>
-                                    l.id === layer.id
-                                      ? { ...l, hexTargetColor: hex, targetColor: rgb }
-                                      : l
+                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="color"
+                                value={layer.hexTargetColor}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveLayerId(layer.id);
+                                }}
+                                onChange={(e) => {
+                                  const hex = e.target.value;
+                                  const rgb = hexToRgb(hex).map((c) => Math.round(c * 255)) as [number, number, number];
+                                  setLayers((prev) => {
+                                    const next = prev.map((l) =>
+                                      l.id === layer.id
+                                        ? { ...l, hexTargetColor: hex, targetColor: rgb }
+                                        : l
+                                    );
+                                    compileLayers(next);
+                                    return next;
+                                  });
+                                }}
+                                className="color-picker-input w-8 h-8 rounded-md cursor-pointer border border-white/15 hover:border-primary/40 transition-colors"
+                                title="Select target color to change from"
+                              />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPickingColorForLayerId(
+                                    pickingColorForLayerId === layer.id ? null : layer.id
                                   );
-                                  compileLayers(next);
-                                  return next;
-                                });
-                              }}
-                              className="color-picker-input w-8 h-8 rounded-md cursor-pointer border border-white/15 hover:border-primary/40 transition-colors"
-                              title="Select target color to change from"
-                            />
+                                }}
+                                className={`lg:hidden w-8 h-8 flex items-center justify-center rounded-md border transition-all cursor-pointer ${
+                                  pickingColorForLayerId === layer.id
+                                    ? "bg-primary border-primary text-primary-foreground animate-pulse"
+                                    : "bg-white/5 border-white/10 hover:border-primary/40 hover:bg-white/10 text-tech-muted hover:text-tech-fg"
+                                }`}
+                                title="Pick color from 3D model (Eyedropper)"
+                              >
+                                <Pipette className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
 
                             <ChevronRight className="w-3.5 h-3.5 text-tech-muted" />
                             
