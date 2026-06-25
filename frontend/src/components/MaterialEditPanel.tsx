@@ -458,6 +458,164 @@ export function MaterialEditPanel({
     }
   }, [viewerRef]);
 
+  // ── Sequential layers compilation pipeline ──────────────────────────────────
+  const compileLayers = useCallback(
+    (layersList: ColorSwapLayer[]) => {
+      captureAndNotify();
+      const el = viewerRef.current;
+      if (!el) return;
+      const symbols = Object.getOwnPropertySymbols(el);
+      const sceneSymbol = symbols.find((s) => s.description === "scene");
+      if (!sceneSymbol) return;
+      const scene = (el as any)[sceneSymbol];
+      if (!scene) return;
+
+      // Special case: if stack is fully cleared, restore all backups directly
+      if (layersList.length === 0) {
+        scene.traverse((child: any) => {
+          if (child.isMesh) {
+            const backup = meshBackups.current.get(child.uuid);
+            if (backup) {
+              if (backup.type === "texture" && backup.imageData && child.material?.map) {
+                child.material.map.image = backup.imageData;
+                child.material.map.needsUpdate = true;
+              } else if (backup.type === "vertex" && backup.vertexColors && child.geometry?.attributes?.color) {
+                const colorAttr = child.geometry.attributes.color;
+                (colorAttr.array as Float32Array).set(backup.vertexColors);
+                colorAttr.needsUpdate = true;
+              }
+            }
+          }
+        });
+        if (typeof el.queueRender === "function") {
+          el.queueRender();
+        }
+        dispatchModelEdited();
+        return;
+      }
+
+      // Sequential list of visible swaps
+      const activeLayers = layersList.filter((l) => l.visible);
+
+      scene.traverse((child: any) => {
+        if (child.isMesh) {
+          // Initialize backup once per mesh dynamically if not present
+          if (!meshBackups.current.has(child.uuid)) {
+            if (child.material?.map?.image) {
+              const img = child.material.map.image;
+              const isAllowed = img && (
+                img instanceof HTMLImageElement ||
+                img instanceof HTMLCanvasElement ||
+                (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) ||
+                (typeof OffscreenCanvas !== 'undefined' && img instanceof OffscreenCanvas)
+              );
+              if (isAllowed) {
+                const canvas = document.createElement("canvas");
+                canvas.width = img.width || 1024;
+                canvas.height = img.height || 1024;
+                const ctx = canvas.getContext("2d");
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  meshBackups.current.set(child.uuid, {
+                    type: "texture",
+                    imageData: canvas,
+                  });
+                }
+              }
+            } else if (child.geometry?.attributes?.color) {
+              const colorAttr = child.geometry.attributes.color;
+              meshBackups.current.set(child.uuid, {
+                type: "vertex",
+                vertexColors: new Float32Array(colorAttr.array),
+              });
+            }
+          }
+
+          const backup = meshBackups.current.get(child.uuid);
+          if (!backup) return;
+
+          if (backup.type === "texture" && backup.imageData) {
+            const map = child.material?.map;
+            if (!map) return;
+
+            // Start buffers
+            const tempCanvas = document.createElement("canvas");
+            tempCanvas.width = backup.imageData.width;
+            tempCanvas.height = backup.imageData.height;
+            const tempCtx = tempCanvas.getContext("2d");
+            if (tempCtx) tempCtx.drawImage(backup.imageData, 0, 0);
+
+            const targetCanvas = document.createElement("canvas");
+            targetCanvas.width = backup.imageData.width;
+            targetCanvas.height = backup.imageData.height;
+            const targetCtx = targetCanvas.getContext("2d");
+            if (targetCtx) targetCtx.drawImage(backup.imageData, 0, 0);
+
+            let currentSrcCanvas = tempCanvas;
+            let currentDestCanvas = targetCanvas;
+
+            activeLayers.forEach((layer) => {
+              const replacementRgb = hexToRgb(layer.replacementColor).map((c) =>
+                Math.round(c * 255)
+              ) as [number, number, number];
+
+              replaceColorInCanvas(
+                currentSrcCanvas,
+                currentDestCanvas,
+                layer.targetColor,
+                replacementRgb,
+                layer.tolerance,
+                layer.preserveShading
+              );
+
+              // Swap buffers for the next layer swap
+              const swap = currentSrcCanvas;
+              currentSrcCanvas = currentDestCanvas;
+              currentDestCanvas = swap;
+            });
+
+            // The last calculated result holds the compiled canvas
+            const finalCanvas = currentSrcCanvas;
+            map.image = finalCanvas;
+            map.needsUpdate = true;
+          } else if (backup.type === "vertex" && backup.vertexColors && child.geometry?.attributes?.color) {
+            const colorAttr = child.geometry.attributes.color;
+            const workingArray = new Float32Array(backup.vertexColors);
+
+            activeLayers.forEach((layer) => {
+              const replacementRgb = hexToRgb(layer.replacementColor).map((c) =>
+                Math.round(c * 255)
+              ) as [number, number, number];
+
+              replaceColorInVertices(
+                workingArray,
+                colorAttr.array as Float32Array,
+                layer.targetColor,
+                replacementRgb,
+                layer.tolerance,
+                layer.preserveShading
+              );
+
+              workingArray.set(colorAttr.array as Float32Array);
+            });
+
+            if (activeLayers.length === 0) {
+              (colorAttr.array as Float32Array).set(backup.vertexColors);
+            }
+            colorAttr.needsUpdate = true;
+          }
+        }
+      });
+
+      if (typeof el.queueRender === "function") {
+        el.queueRender();
+      }
+      dispatchModelEdited();
+    },
+    [viewerRef, dispatchModelEdited, captureAndNotify]
+  );
+
+
   // ── Decal helpers ──────────────────────────────────────────────────────────
 
   /** Notify ReviewStage of the current active decal configuration (texture + transforms). */
@@ -819,162 +977,6 @@ export function MaterialEditPanel({
     []
   );
 
-  // ── Sequential layers compilation pipeline ──────────────────────────────────
-  const compileLayers = useCallback(
-    (layersList: ColorSwapLayer[]) => {
-      captureAndNotify();
-      const el = viewerRef.current;
-      if (!el) return;
-      const symbols = Object.getOwnPropertySymbols(el);
-      const sceneSymbol = symbols.find((s) => s.description === "scene");
-      if (!sceneSymbol) return;
-      const scene = (el as any)[sceneSymbol];
-      if (!scene) return;
-
-      // Special case: if stack is fully cleared, restore all backups directly
-      if (layersList.length === 0) {
-        scene.traverse((child: any) => {
-          if (child.isMesh) {
-            const backup = meshBackups.current.get(child.uuid);
-            if (backup) {
-              if (backup.type === "texture" && backup.imageData && child.material?.map) {
-                child.material.map.image = backup.imageData;
-                child.material.map.needsUpdate = true;
-              } else if (backup.type === "vertex" && backup.vertexColors && child.geometry?.attributes?.color) {
-                const colorAttr = child.geometry.attributes.color;
-                (colorAttr.array as Float32Array).set(backup.vertexColors);
-                colorAttr.needsUpdate = true;
-              }
-            }
-          }
-        });
-        if (typeof el.queueRender === "function") {
-          el.queueRender();
-        }
-        dispatchModelEdited();
-        return;
-      }
-
-      // Sequential list of visible swaps
-      const activeLayers = layersList.filter((l) => l.visible);
-
-      scene.traverse((child: any) => {
-        if (child.isMesh) {
-          // Initialize backup once per mesh dynamically if not present
-          if (!meshBackups.current.has(child.uuid)) {
-            if (child.material?.map?.image) {
-              const img = child.material.map.image;
-              const isAllowed = img && (
-                img instanceof HTMLImageElement ||
-                img instanceof HTMLCanvasElement ||
-                (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) ||
-                (typeof OffscreenCanvas !== 'undefined' && img instanceof OffscreenCanvas)
-              );
-              if (isAllowed) {
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width || 1024;
-                canvas.height = img.height || 1024;
-                const ctx = canvas.getContext("2d");
-                if (ctx) {
-                  ctx.drawImage(img, 0, 0);
-                  meshBackups.current.set(child.uuid, {
-                    type: "texture",
-                    imageData: canvas,
-                  });
-                }
-              }
-            } else if (child.geometry?.attributes?.color) {
-              const colorAttr = child.geometry.attributes.color;
-              meshBackups.current.set(child.uuid, {
-                type: "vertex",
-                vertexColors: new Float32Array(colorAttr.array),
-              });
-            }
-          }
-
-          const backup = meshBackups.current.get(child.uuid);
-          if (!backup) return;
-
-          if (backup.type === "texture" && backup.imageData) {
-            const map = child.material?.map;
-            if (!map) return;
-
-            // Start buffers
-            const tempCanvas = document.createElement("canvas");
-            tempCanvas.width = backup.imageData.width;
-            tempCanvas.height = backup.imageData.height;
-            const tempCtx = tempCanvas.getContext("2d");
-            if (tempCtx) tempCtx.drawImage(backup.imageData, 0, 0);
-
-            const targetCanvas = document.createElement("canvas");
-            targetCanvas.width = backup.imageData.width;
-            targetCanvas.height = backup.imageData.height;
-            const targetCtx = targetCanvas.getContext("2d");
-            if (targetCtx) targetCtx.drawImage(backup.imageData, 0, 0);
-
-            let currentSrcCanvas = tempCanvas;
-            let currentDestCanvas = targetCanvas;
-
-            activeLayers.forEach((layer) => {
-              const replacementRgb = hexToRgb(layer.replacementColor).map((c) =>
-                Math.round(c * 255)
-              ) as [number, number, number];
-
-              replaceColorInCanvas(
-                currentSrcCanvas,
-                currentDestCanvas,
-                layer.targetColor,
-                replacementRgb,
-                layer.tolerance,
-                layer.preserveShading
-              );
-
-              // Swap buffers for the next layer swap
-              const swap = currentSrcCanvas;
-              currentSrcCanvas = currentDestCanvas;
-              currentDestCanvas = swap;
-            });
-
-            // The last calculated result holds the compiled canvas
-            const finalCanvas = currentSrcCanvas;
-            map.image = finalCanvas;
-            map.needsUpdate = true;
-          } else if (backup.type === "vertex" && backup.vertexColors && child.geometry?.attributes?.color) {
-            const colorAttr = child.geometry.attributes.color;
-            const workingArray = new Float32Array(backup.vertexColors);
-
-            activeLayers.forEach((layer) => {
-              const replacementRgb = hexToRgb(layer.replacementColor).map((c) =>
-                Math.round(c * 255)
-              ) as [number, number, number];
-
-              replaceColorInVertices(
-                workingArray,
-                colorAttr.array as Float32Array,
-                layer.targetColor,
-                replacementRgb,
-                layer.tolerance,
-                layer.preserveShading
-              );
-
-              workingArray.set(colorAttr.array as Float32Array);
-            });
-
-            if (activeLayers.length === 0) {
-              (colorAttr.array as Float32Array).set(backup.vertexColors);
-            }
-            colorAttr.needsUpdate = true;
-          }
-        }
-      });
-
-      if (typeof el.queueRender === "function") {
-        el.queueRender();
-      }
-      dispatchModelEdited();
-    },
-    [viewerRef, dispatchModelEdited, captureAndNotify]
-  );
 
 
 
