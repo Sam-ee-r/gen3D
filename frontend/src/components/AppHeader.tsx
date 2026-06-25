@@ -3,6 +3,7 @@ import { Box, RotateCcw, User, ChevronDown, Linkedin, Github, Info } from "lucid
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { ProfilePanel } from "@/components/ProfilePanel";
+import { AuthModal } from "@/components/AuthModal";
 
 interface AppHeaderProps {
   onReset: () => void;
@@ -13,6 +14,7 @@ interface AppHeaderProps {
 export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderProps) {
   const { user } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [showDeveloperDropdown, setShowDeveloperDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -126,9 +128,14 @@ export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderPro
         </div>
       </header>
 
+      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
       {showProfile && (
         <ProfilePanel
           onClose={() => setShowProfile(false)}
+          onSignInClick={() => {
+            setShowProfile(false);
+            setShowAuthModal(true);
+          }}
           onSelectCreation={(id) => {
             onSelectCreation?.(id);
             setShowProfile(false);

@@ -3,16 +3,15 @@ import { X, LogOut, User, Clock, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase";
 import type { Creation } from "@/lib/supabase";
-import { AuthModal } from "@/components/AuthModal";
 
 interface ProfilePanelProps {
   onClose: () => void;
   onSelectCreation?: (jobId: string) => void;
+  onSignInClick?: () => void;
 }
 
-export function ProfilePanel({ onClose, onSelectCreation }: ProfilePanelProps) {
+export function ProfilePanel({ onClose, onSelectCreation, onSignInClick }: ProfilePanelProps) {
   const { user, signOut } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [history, setHistory] = useState<Creation[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -43,8 +42,6 @@ export function ProfilePanel({ onClose, onSelectCreation }: ProfilePanelProps) {
 
   return (
     <>
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
-
       {/* Backdrop */}
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
@@ -154,7 +151,7 @@ export function ProfilePanel({ onClose, onSelectCreation }: ProfilePanelProps) {
               <p className="text-xs text-tech-muted leading-relaxed">Sign in to keep your generation history and access your models anytime.</p>
             </div>
             <button
-              onClick={() => setShowAuthModal(true)}
+              onClick={() => onSignInClick?.()}
               className="w-full py-2.5 rounded-xl bg-primary/15 border border-primary/30 hover:bg-primary/25 text-primary text-sm font-medium transition-all"
             >
               Sign In
