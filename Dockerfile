@@ -1,10 +1,12 @@
 FROM python:3.11-slim
 
-# Install system dependencies for Open3D and system graphics
+# Install system dependencies for Open3D, curl, and system graphics
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /code
