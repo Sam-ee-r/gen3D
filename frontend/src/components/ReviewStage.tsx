@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
-import { Download, Grid3X3, AlertTriangle, Eye, Stamp, MessageSquare, Edit3, Info } from "lucide-react";
+import { Download, Grid3X3, AlertTriangle, Eye, Stamp, MessageSquare, Edit3, Info, Move } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialEditPanel } from "./MaterialEditPanel";
 import type { ActiveDecalConfig, ConfirmedDecal, DecalCallbacks } from "./MaterialEditPanel";
@@ -652,6 +652,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
   const { user } = useAuth();
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const viewerRef = useRef<ModelViewerElement | null>(null);
+  const apiBase = import.meta.env.VITE_API_URL || "";
 
   // ── Review Modal State ───────────────────────────────────────────────
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -735,7 +736,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
 
     // Update in-memory job status on backend so that poll returns the updated label
     try {
-      await fetch(`/api/rename/${jobId}`, {
+      await fetch(`${apiBase}/api/rename/${jobId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: cleanName }),
@@ -747,6 +748,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
 
   // ── Decal Studio State (lifted from MaterialEditPanel to ReviewStage) ───────
   const [activeStudioTab, setActiveStudioTab] = useState<"colorChanger" | "meshSettings" | "decalPlacer">("colorChanger");
+  const [isStampingEnabled, setIsStampingEnabled] = useState(true);
   const [activeDecalConfig, setActiveDecalConfig] = useState<ActiveDecalConfig | null>(null);
   const [confirmedDecals, setConfirmedDecals] = useState<ConfirmedDecal[]>([]);
   // Ghost preview decal mesh ref
@@ -755,11 +757,11 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
   const rafPendingRef = useRef<boolean>(false);
 
   useEffect(() => {
-    fetch(`/api/status/${jobId}`)
+    fetch(`${apiBase}/api/status/${jobId}`)
       .then((r) => r.json())
       .then((data) => setJobStatus(data))
       .catch(() => {});
-  }, [jobId]);
+  }, [jobId, apiBase]);
 
   const hasRaw = Boolean(jobStatus?.raw_model_path);
   const hasRefined = Boolean(jobStatus?.model_path);
@@ -997,7 +999,13 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
   // Native event listeners on model-viewer for "Drag to Orbit, Click to Place"
   useEffect(() => {
     const el = viewerRef.current;
-    if (!el || activeStudioTab !== "decalPlacer" || !activeDecalConfig?.texture) return;
+    if (!el || activeStudioTab !== "decalPlacer" || !activeDecalConfig?.texture || !isStampingEnabled) {
+      if (ghostDecalRef.current) {
+        disposeMesh(ghostDecalRef.current);
+        ghostDecalRef.current = null;
+      }
+      return;
+    }
 
     let startX = 0;
     let startY = 0;
@@ -1113,7 +1121,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       el.removeEventListener("pointerup", onPointerUp);
       el.removeEventListener("wheel", onWheel, { capture: true });
     };
-  }, [activeStudioTab, activeDecalConfig, hitTestAt, getScene, buildStickerMesh, disposeMesh, placeStickerAt]);
+  }, [activeStudioTab, activeDecalConfig, isStampingEnabled, hitTestAt, getScene, buildStickerMesh, disposeMesh, placeStickerAt]);
 
   // Decal callbacks for MaterialEditPanel UI
   const decalCallbacks: DecalCallbacks = {
@@ -1251,7 +1259,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
                 <div className="w-full flex flex-col gap-4">
                   <div className="relative group rounded-xl overflow-hidden border border-white/5 shadow-2xl">
                     <img
-                      src={`/api/inputs/${jobId}`}
+                      src={`${apiBase}/api/inputs/${jobId}`}
                       alt="Original Input"
                       className="w-full h-auto object-contain max-h-[300px]"
                     />
@@ -1274,8 +1282,8 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
               <ModelViewerPanel
                 title="Generated 3D Model"
                 subtitle="model_raw.glb • Textures & Mesh"
-                src={`/api/download-raw/${jobId}`}
-                refinedSrc={`/api/download/${jobId}`}
+                src={`${apiBase}/api/download-raw/${jobId}`}
+                refinedSrc={`${apiBase}/api/download/${jobId}`}
                 filename={jobStatus?.object_label ? `${jobStatus.object_label.toLowerCase().replace(/\s+/g, '_')}_raw.glb` : "model_raw.glb"}
                 refinedFilename={jobStatus?.object_label ? `${jobStatus.object_label.toLowerCase().replace(/\s+/g, '_')}_refined.glb` : "model_refined.glb"}
                 available={hasRaw}
@@ -1283,17 +1291,39 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
                 accentColor="oklch(0.65 0.18 30 / 0.8)"
                 stats={{ faces: rawFaces, vertices: rawVertices, type: "PBR Asset" }}
                 viewerRef={viewerRef}
-                decalMode={activeStudioTab === "decalPlacer"}
+                decalMode={activeStudioTab === "decalPlacer" && isStampingEnabled}
               />
               {/* The blocking overlay div was removed to allow native orbit controls.
                   The logic is now handled by native pointer events on viewerRef.current. */}
-              {/* Floating sticker placement badge */}
+              {/* Floating sticker placement toggle & badge */}
               {activeStudioTab === "decalPlacer" && activeDecalConfig?.texture && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-in fade-in duration-300">
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-black/70 backdrop-blur-md border border-primary/30 shadow-lg">
-                    <Stamp className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-[10px] font-mono text-primary font-semibold">
-                      Click to place sticker
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 animate-in fade-in duration-300">
+                  {/* Mode Toggle */}
+                  <div className="flex bg-black/70 backdrop-blur-md border border-white/10 rounded-full p-1 shadow-lg pointer-events-auto">
+                    <button
+                      onClick={() => setIsStampingEnabled(false)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono font-semibold transition-all ${
+                        !isStampingEnabled ? "bg-primary text-primary-foreground" : "text-tech-muted hover:text-tech-fg"
+                      }`}
+                    >
+                      <Move className="w-3.5 h-3.5" />
+                      Move
+                    </button>
+                    <button
+                      onClick={() => setIsStampingEnabled(true)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono font-semibold transition-all ${
+                        isStampingEnabled ? "bg-primary text-primary-foreground" : "text-tech-muted hover:text-tech-fg"
+                      }`}
+                    >
+                      <Stamp className="w-3.5 h-3.5" />
+                      Stamp
+                    </button>
+                  </div>
+                  
+                  {/* Status Badge */}
+                  <div className="pointer-events-none flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur-sm border border-white/5">
+                    <span className="text-[9px] font-mono text-white/70">
+                      {isStampingEnabled ? "Click on model to place sticker" : "Drag to orbit camera"}
                     </span>
                   </div>
                 </div>

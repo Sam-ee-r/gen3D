@@ -64,7 +64,8 @@ export function ProcessingStage({ jobId, onComplete }: ProcessingStageProps) {
     // Poll real status
     const poller = setInterval(async () => {
       try {
-        const res = await fetch(`/api/status/${jobId}`);
+        const apiBase = import.meta.env.VITE_API_URL || "";
+        const res = await fetch(`${apiBase}/api/status/${jobId}`);
         if (!res.ok) return;
         const data = await res.json();
 

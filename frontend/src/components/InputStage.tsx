@@ -48,7 +48,8 @@ export function InputStage({ onGenerate }: InputStageProps) {
       if (user) {
         formData.append("user_id", user.id);
       }
-      const res = await fetch("/api/generate-3d", { method: "POST", body: formData });
+      const apiBase = import.meta.env.VITE_API_URL || "";
+      const res = await fetch(`${apiBase}/api/generate-3d`, { method: "POST", body: formData });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const { job_id } = await res.json();
       onGenerate(job_id);
