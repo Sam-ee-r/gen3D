@@ -33,7 +33,7 @@ export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderPro
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
           {/* Logo Brand */}
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Polyfy Logo" className="h-7 w-auto object-contain" />
+            <img src="https://mxjkjeforjlgotvdmibm.supabase.co/storage/v1/object/public/inputs/logo.png" alt="Polyfy Logo" className="h-7 w-auto object-contain" />
             <span className="text-base sm:text-lg font-bold tracking-tight text-foreground font-display select-none">
               Polyfy
             </span>

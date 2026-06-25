@@ -39,7 +39,7 @@ export const Route = createRootRoute({
       { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
-      { rel: "icon", type: "image/png", href: "/logo.png" },
+      { rel: "icon", type: "image/png", href: "https://mxjkjeforjlgotvdmibm.supabase.co/storage/v1/object/public/inputs/logo.png" },
       { rel: "stylesheet", href: appCss },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
