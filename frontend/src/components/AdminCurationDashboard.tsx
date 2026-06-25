@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { AlertTriangle, CheckCircle, XCircle, Loader2, ShieldAlert, ToggleLeft, ToggleRight, Star, ArrowUp, ArrowDown } from "lucide-react";
+import { AlertTriangle, CheckCircle, XCircle, Loader2, ShieldAlert, ToggleLeft, ToggleRight, Star, ArrowUp, ArrowDown, Plus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { Creation, SystemStatus, Review } from "@/lib/supabase";
 
@@ -19,6 +19,88 @@ export function AdminCurationDashboard() {
   const [limitWarning, setLimitWarning] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+  // Tab control: "curation" | "users"
+  const [activeTab, setActiveTab] = useState<"curation" | "users">("curation");
+  
+  // User management state
+  const [users, setUsers] = useState<any[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const fetchUsers = useCallback(async () => {
+    setLoadingUsers(true);
+    setActionError(null);
+    try {
+      const { data, error } = await supabase.rpc("admin_get_users", {
+        admin_pass: "lightning",
+      });
+      if (error) {
+        if (error.message.includes("does not exist")) {
+          setActionError("Database functions missing. Please execute the SQL migration script in your Supabase SQL Editor (check the implementation plan).");
+        } else {
+          setActionError(error.message);
+        }
+      } else {
+        setUsers(data ?? []);
+      }
+    } catch (err: any) {
+      setActionError(err?.message ?? "Failed to fetch users");
+    }
+    setLoadingUsers(false);
+  }, []);
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserEmail || !newUserPassword) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      const { error } = await supabase.rpc("admin_create_user", {
+        admin_pass: "lightning",
+        user_email: newUserEmail.trim(),
+        user_password: newUserPassword,
+      });
+      if (error) {
+        setActionError(error.message);
+      } else {
+        setNewUserEmail("");
+        setNewUserPassword("");
+        setShowAddUserModal(false);
+        await fetchUsers();
+      }
+    } catch (err: any) {
+      setActionError(err?.message ?? "Failed to create user");
+    }
+    setActionLoading(false);
+  };
+
+  const handleDeleteUser = async (userId: string, email: string) => {
+    const confirmDelete = window.confirm(`Are you sure you want to delete user ${email}? This will permanently remove their account.`);
+    if (!confirmDelete) return;
+
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      const { error } = await supabase.rpc("admin_delete_user", {
+        admin_pass: "lightning",
+        target_user_id: userId,
+      });
+      if (error) {
+        setActionError(error.message);
+      } else {
+        await fetchUsers();
+      }
+    } catch (err: any) {
+      setActionError(err?.message ?? "Failed to delete user");
+    }
+    setActionLoading(false);
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -36,12 +118,14 @@ export function AdminCurationDashboard() {
       setSystemStatus(status as SystemStatus ?? null);
       setApprovedCount(count ?? 0);
 
-      const { data: optIns } = await supabase
+      const { data: allCreations } = await supabase
         .from("creations")
         .select("*, reviews(*)")
-        .eq("opt_in_for_display", true)
         .order("created_at", { ascending: false });
-      setCreations((optIns as CreationWithReviews[]) ?? []);
+      const reviewedCreations = (allCreations ?? []).filter(
+        (c) => c.reviews && c.reviews.length > 0
+      );
+      setCreations(reviewedCreations as CreationWithReviews[]);
 
       // Fetch approved creations with display_order check
       const approvedRes = await supabase
@@ -72,6 +156,12 @@ export function AdminCurationDashboard() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (activeTab === "users") {
+      fetchUsers();
+    }
+  }, [activeTab, fetchUsers]);
 
   const toggleApproval = async (creation: Creation) => {
     // If approving and already at limit, show warning
@@ -208,19 +298,43 @@ export function AdminCurationDashboard() {
         </div>
       )}
 
+      {/* Tab Selectors */}
+      <div className="flex border-b border-white/10 mb-6 font-mono text-xs">
+        <button
+          onClick={() => setActiveTab("curation")}
+          className={`px-4 py-2 border-b-2 font-semibold transition-all cursor-pointer ${
+            activeTab === "curation"
+              ? "border-primary text-primary"
+              : "border-transparent text-tech-muted hover:text-tech-fg"
+          }`}
+        >
+          Curation Dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab("users")}
+          className={`px-4 py-2 border-b-2 font-semibold transition-all cursor-pointer ${
+            activeTab === "users"
+              ? "border-primary text-primary"
+              : "border-transparent text-tech-muted hover:text-tech-fg"
+          }`}
+        >
+          User Account Manager
+        </button>
+      </div>
+
       {/* Main Content Area */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
-      ) : (
+      ) : activeTab === "curation" ? (
         <div className="flex flex-col lg:flex-row gap-8 items-start">
           {/* Main Feed Section */}
           <div className="flex-1 min-w-0 w-full">
-            <h2 className="text-xs font-mono font-bold text-tech-muted uppercase tracking-widest mb-4">Opt-in Submissions Feed</h2>
+            <h2 className="text-xs font-mono font-bold text-tech-muted uppercase tracking-widest mb-4">Reviewed Submissions Feed</h2>
             {creations.length === 0 ? (
               <div className="text-center py-20 text-tech-muted font-mono text-sm bg-white/3 border border-white/8 rounded-2xl">
-                No opt-in submissions yet.
+                No reviewed creations yet.
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -289,16 +403,26 @@ export function AdminCurationDashboard() {
                       </div>
                       <button
                         onClick={() => toggleApproval(c)}
-                        disabled={updatingId === c.id}
-                        title={c.is_approved ? "Revoke Approval" : "Approve for Gallery"}
+                        disabled={updatingId === c.id || !c.opt_in_for_display}
+                        title={
+                          !c.opt_in_for_display
+                            ? "Cannot approve because user did not opt in for display"
+                            : c.is_approved
+                            ? "Revoke Approval"
+                            : "Approve for Gallery"
+                        }
                         className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-mono font-semibold transition-all ${
-                          c.is_approved
-                            ? "bg-green-500/15 border border-green-500/30 text-green-400 hover:bg-red-500/15 hover:border-red-500/30 hover:text-red-400"
-                            : "bg-white/5 border border-white/10 text-tech-muted hover:bg-green-500/10 hover:border-green-500/30 hover:text-green-400"
+                          !c.opt_in_for_display
+                            ? "bg-white/5 border border-white/5 text-tech-muted/40 cursor-not-allowed opacity-50"
+                            : c.is_approved
+                            ? "bg-green-500/15 border border-green-500/30 text-green-400 hover:bg-red-500/15 hover:border-red-500/30 hover:text-red-400 cursor-pointer"
+                            : "bg-white/5 border border-white/10 text-tech-muted hover:bg-green-500/10 hover:border-green-500/30 hover:text-green-400 cursor-pointer"
                         }`}
                       >
                         {updatingId === c.id ? (
                           <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : !c.opt_in_for_display ? (
+                          <><XCircle className="w-3 h-3" /> No Opt-in</>
                         ) : c.is_approved ? (
                           <><CheckCircle className="w-3 h-3" /> Approved</>
                         ) : (
@@ -393,6 +517,153 @@ export function AdminCurationDashboard() {
               )}
             </div>
           </div>
+        </div>
+      ) : (
+        /* User Manager Tab */
+        <div className="w-full flex flex-col gap-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xs font-mono font-bold text-tech-muted uppercase tracking-widest">Signed Up Users ({users.length})</h2>
+              <p className="text-[11px] text-tech-muted mt-1 font-mono">
+                View all registered credentials, create new ones, or revoke account access.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddUserModal(true)}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 bg-primary/15 border border-primary/30 hover:bg-primary/25 text-primary text-xs font-mono font-medium rounded-xl transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              Add New User
+            </button>
+          </div>
+
+          {actionError && (
+            <div className="p-4 bg-red-500/15 border border-red-500/40 rounded-2xl text-red-400 text-xs font-mono">
+              {actionError}
+            </div>
+          )}
+
+          {/* Search/Filter */}
+          <div className="w-full max-w-md">
+            <input
+              type="text"
+              placeholder="Search users by email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-white/10 bg-black/20 text-tech-fg text-xs font-mono focus:outline-none focus:border-primary/50 transition-colors"
+            />
+          </div>
+
+          {/* Users Table */}
+          {loadingUsers ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            </div>
+          ) : users.length === 0 ? (
+            <div className="text-center py-16 text-tech-muted font-mono text-sm bg-white/3 border border-white/8 rounded-2xl">
+              No users registered yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-white/8 bg-white/3">
+              <table className="w-full text-left border-collapse font-mono text-xs">
+                <thead>
+                  <tr className="border-b border-white/8 bg-black/10 text-tech-muted text-[10px] uppercase tracking-wider">
+                    <th className="p-4">User ID</th>
+                    <th className="p-4">Email</th>
+                    <th className="p-4">Registered Date</th>
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users
+                    .filter((u) => u.email.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .map((userItem) => (
+                      <tr key={userItem.id} className="border-b border-white/5 hover:bg-white/3 transition-colors text-tech-fg">
+                        <td className="p-4 text-tech-muted text-[10px] truncate max-w-[120px]" title={userItem.id}>
+                          {userItem.id}
+                        </td>
+                        <td className="p-4 font-semibold">{userItem.email}</td>
+                        <td className="p-4 text-tech-muted">
+                          {new Date(userItem.created_at).toLocaleString()}
+                        </td>
+                        <td className="p-4 text-right">
+                          <button
+                            onClick={() => handleDeleteUser(userItem.id, userItem.email)}
+                            disabled={actionLoading}
+                            className="px-2.5 py-1.5 rounded-lg border border-red-500/20 bg-red-950/10 hover:bg-red-500/15 hover:border-red-500/30 text-red-400 text-[10px] transition-all cursor-pointer disabled:opacity-50"
+                          >
+                            Delete Account
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Add User Modal */}
+          {showAddUserModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm">
+              <form
+                onSubmit={handleAddUser}
+                className="bg-tech-bg border border-white/10 rounded-2xl p-6 w-full max-w-sm flex flex-col gap-4 shadow-2xl animate-in zoom-in duration-200"
+              >
+                <div>
+                  <h3 className="text-sm font-bold font-mono text-tech-fg uppercase tracking-wider">Register New User</h3>
+                  <p className="text-[10px] text-tech-muted mt-1 font-mono">Create standard credentials in Supabase Auth.</p>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[9px] font-mono text-tech-muted uppercase tracking-widest">Email</span>
+                    <input
+                      type="email"
+                      required
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-tech-fg text-xs font-mono focus:outline-none focus:border-primary/50 transition-colors"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[9px] font-mono text-tech-muted uppercase tracking-widest">Password</span>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-tech-fg text-xs font-mono focus:outline-none focus:border-primary/50 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddUserModal(false);
+                      setNewUserEmail("");
+                      setNewUserPassword("");
+                    }}
+                    className="flex-1 py-2 text-center border border-white/10 rounded-lg text-tech-muted hover:text-tech-fg hover:bg-white/5 text-xs font-mono transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={actionLoading}
+                    className="flex-1 py-2 text-center bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {actionLoading ? "Creating..." : "Create User"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </div>
       )}
     </div>

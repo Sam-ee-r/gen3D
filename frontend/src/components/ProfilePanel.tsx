@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, LogOut, User, Clock, Loader2 } from "lucide-react";
+import { X, LogOut, User, Clock, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase";
 import type { Creation } from "@/lib/supabase";
@@ -14,6 +14,9 @@ export function ProfilePanel({ onClose, onSelectCreation, onSignInClick }: Profi
   const { user, signOut } = useAuth();
   const [history, setHistory] = useState<Creation[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchHistory = useCallback(async () => {
     if (!user) return;
@@ -35,6 +38,21 @@ export function ProfilePanel({ onClose, onSelectCreation, onSignInClick }: Profi
   const handleSignOut = async () => {
     await signOut();
     onClose();
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const { error } = await supabase.rpc("delete_user_account");
+      if (error) throw error;
+      await signOut();
+      onClose();
+    } catch (err: any) {
+      console.error("Error deleting account:", err);
+      setDeleteError(err.message || "Failed to delete account. Please try again.");
+      setDeleting(false);
+    }
   };
 
   const avatarUrl = user?.user_metadata?.avatar_url;
@@ -130,14 +148,24 @@ export function ProfilePanel({ onClose, onSelectCreation, onSignInClick }: Profi
               )}
             </div>
 
-            {/* Sign out */}
-            <div className="p-4 border-t border-white/8">
+            {/* Actions */}
+            <div className="p-4 border-t border-white/8 flex flex-col gap-2">
               <button
                 onClick={handleSignOut}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/10 bg-white/3 hover:bg-red-500/10 hover:border-red-500/30 text-tech-muted hover:text-red-400 text-sm font-mono transition-all"
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/10 bg-white/3 hover:bg-white/8 text-tech-fg text-sm font-mono transition-all cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
                 Sign Out
+              </button>
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(true);
+                  setDeleteError(null);
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-500/20 bg-red-950/10 hover:bg-red-500/15 hover:border-red-500/30 text-red-400 text-sm font-mono transition-all cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Account
               </button>
             </div>
           </div>
@@ -162,6 +190,51 @@ export function ProfilePanel({ onClose, onSelectCreation, onSignInClick }: Profi
           </div>
         )}
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-tech-bg border border-white/10 rounded-2xl p-6 w-full max-w-sm flex flex-col gap-4 shadow-2xl animate-in zoom-in duration-200">
+            <div>
+              <h3 className="text-sm font-bold font-mono text-tech-fg uppercase tracking-wider">Delete Account</h3>
+              <p className="text-[11px] text-tech-muted mt-2 font-mono leading-relaxed">
+                Are you absolutely sure? This action is permanent and will delete your user credentials and all your creation history.
+              </p>
+            </div>
+
+            {deleteError && (
+              <p className="text-[10px] text-red-400 font-mono bg-red-500/10 border border-red-500/20 p-2.5 rounded-lg">
+                {deleteError}
+              </p>
+            )}
+
+            <div className="flex items-center gap-3 mt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 py-2 text-center border border-white/10 rounded-lg text-tech-muted hover:text-tech-fg hover:bg-white/5 text-xs font-mono transition-all cursor-pointer disabled:opacity-55"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDeleteAccount}
+                className="flex-1 py-2 text-center bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer disabled:opacity-55 flex items-center justify-center gap-1.5"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Yes, Delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

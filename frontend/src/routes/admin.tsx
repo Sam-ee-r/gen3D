@@ -10,7 +10,7 @@ export const Route = createFileRoute("/admin")({
   }),
 });
 
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? "admin";
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? "lightning";
 const SESSION_KEY = "meshrefine_admin_unlocked";
 
 function AdminPage() {
