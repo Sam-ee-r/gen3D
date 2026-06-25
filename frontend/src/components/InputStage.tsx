@@ -59,9 +59,9 @@ export function InputStage({ onGenerate }: InputStageProps) {
   };
 
   return (
-    <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center px-6">
+    <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center px-4 py-6 md:px-8 md:py-12">
       <div className="max-w-2xl w-full text-center mb-10">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-foreground leading-tight font-mono">
+        <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-foreground leading-tight font-mono">
           Turn any object image
           <br />
           into a <span className="text-primary">3D model.</span>

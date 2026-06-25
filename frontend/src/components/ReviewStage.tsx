@@ -1159,13 +1159,13 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
 
 
   return (
-    <div className="min-h-[calc(100vh-3rem)] pt-0 pb-4 px-6 md:px-8">
+    <div className="min-h-[calc(100vh-3rem)] pt-0 pb-4 px-4 md:px-8">
       <div className="max-w-[1800px] mx-auto h-[calc(100vh-5rem)] flex flex-col gap-3">
         {/* Header */}
         <div className="flex items-center justify-between shrink-0 mb-1">
           <div>
             <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <h2 className="text-lg font-bold text-foreground">Generation Complete:</h2>
+              <h2 className="text-base md:text-lg font-bold text-foreground">Generation Complete:</h2>
               {isEditingName ? (
                 <div className="flex items-center gap-1.5 mt-1 sm:mt-0">
                   <input
@@ -1252,7 +1252,7 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
 
           {/* Panel 2: 3D Viewer */}
           <LocalErrorBoundary fallbackTitle="3D Viewport Error">
-            <div className="relative flex-1 min-w-0 flex flex-col">
+            <div className="relative flex-1 min-w-0 min-h-[50vh] lg:min-h-0 flex flex-col">
               <ModelViewerPanel
                 title="Generated 3D Model"
                 subtitle="model_raw.glb • Textures & Mesh"

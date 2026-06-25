@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Box, RotateCcw, User, ChevronDown, Linkedin, Github } from "lucide-react";
+import { Box, RotateCcw, User, ChevronDown, Linkedin, Github, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { ProfilePanel } from "@/components/ProfilePanel";
@@ -30,27 +30,28 @@ export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderPro
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-background/60 backdrop-blur-xl border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.5)] font-mono">
-        <div className="max-w-7xl mx-auto px-6 h-12 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
           {/* Logo Brand */}
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
               <Box className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="text-lg font-semibold tracking-tight text-foreground font-display">
+            <span className="text-base sm:text-lg font-semibold tracking-tight text-foreground font-display">
               MeshRefine AI
             </span>
           </div>
 
           {/* Right Navigation controls */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             {/* About the Developer Dropdown */}
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setShowDeveloperDropdown(!showDeveloperDropdown)}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/5 text-xs text-muted-foreground hover:text-foreground transition-all duration-200"
+                className="flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/5 text-xs text-muted-foreground hover:text-foreground transition-all duration-200"
               >
-                <span>About Developer</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showDeveloperDropdown ? "rotate-180" : ""}`} />
+                <Info className="w-4 h-4 sm:hidden" />
+                <span className="hidden sm:inline">About Developer</span>
+                <ChevronDown className={`w-3.5 h-3.5 hidden sm:block transition-transform duration-200 ${showDeveloperDropdown ? "rotate-180" : ""}`} />
               </button>
 
               {showDeveloperDropdown && (
@@ -93,10 +94,10 @@ export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderPro
                 variant="ghost"
                 size="sm"
                 onClick={onReset}
-                className="text-muted-foreground hover:text-foreground gap-1.5 text-xs"
+                className="text-muted-foreground hover:text-foreground gap-1.5 text-xs px-2 sm:px-3"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                New Generation
+                <RotateCcw className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">New Generation</span>
               </Button>
             )}
 

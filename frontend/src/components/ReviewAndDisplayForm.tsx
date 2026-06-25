@@ -121,7 +121,7 @@ export function ReviewAndDisplayForm({ creationId, user, onClose, onDismiss }: R
                 value={reviewerName}
                 onChange={(e) => setReviewerName(e.target.value)}
                 placeholder={user ? "Edit your name…" : "Anonymous"}
-                className="w-full px-3.5 py-2.5 rounded-lg bg-black/50 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all placeholder:text-white/30"
+                className="w-full p-3 rounded-lg bg-black/50 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all placeholder:text-white/30"
               />
             </div>
 
@@ -133,7 +133,7 @@ export function ReviewAndDisplayForm({ creationId, user, onClose, onDismiss }: R
                 onChange={(e) => setComment(e.target.value)}
                 rows={3}
                 placeholder="How was the quality? Any feedback for us?"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-black/50 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all resize-none placeholder:text-white/30"
+                className="w-full p-3 rounded-lg bg-black/50 border border-white/15 text-white text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all resize-none placeholder:text-white/30"
               />
             </div>
 

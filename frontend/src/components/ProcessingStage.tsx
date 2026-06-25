@@ -99,7 +99,7 @@ export function ProcessingStage({ jobId, onComplete }: ProcessingStageProps) {
   }, [jobId, onComplete]);
 
   return (
-    <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center px-6 py-10 gap-8">
+    <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center px-4 py-6 md:px-8 md:py-10 gap-8">
       {/* Progress bar at top */}
       <div className="w-full max-w-4xl space-y-2">
         <div className="flex items-center justify-between mb-1">

@@ -138,8 +138,8 @@ export function AdminCurationDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-tech-bg p-8">
-      <h1 className="text-2xl font-bold font-mono text-tech-fg mb-6 flex items-center gap-3">
+    <div className="min-h-screen bg-tech-bg px-4 py-6 md:px-8 md:py-12">
+      <h1 className="text-xl md:text-2xl lg:text-3xl font-bold font-mono text-tech-fg mb-6 flex items-center gap-3">
         <ShieldAlert className="w-6 h-6 text-primary" /> Admin Curation Dashboard
       </h1>
 
@@ -147,7 +147,7 @@ export function AdminCurationDashboard() {
       {systemStatus?.api_token_exhausted && (
         <div className="flex items-center gap-3 mb-6 p-4 bg-red-500/15 border border-red-500/40 rounded-2xl text-red-400 animate-pulse">
           <AlertTriangle className="w-5 h-5 shrink-0" />
-          <p className="text-sm font-mono font-semibold">
+          <p className="text-sm md:text-base font-mono font-semibold whitespace-normal text-wrap">
             CRITICAL: Backend Generation API Credits Exhausted. Please Refill.
           </p>
         </div>

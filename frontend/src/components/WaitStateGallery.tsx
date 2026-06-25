@@ -68,28 +68,28 @@ export function WaitStateGallery() {
         {creations.map((c) => (
           <div
             key={c.id}
-            className="flex flex-col sm:flex-row bg-white/3 border border-white/8 rounded-2xl overflow-hidden hover:border-primary/20 transition-colors"
+            className="flex flex-col md:flex-row bg-white/3 border border-white/8 rounded-2xl overflow-hidden hover:border-primary/20 transition-colors"
           >
             {/* 1. Input image (Left) */}
             {c.original_image_url && (
-              <div className="w-full sm:w-36 shrink-0 bg-black/30 flex items-center justify-center border-b sm:border-b-0 sm:border-r border-white/8">
+              <div className="w-full md:w-36 shrink-0 bg-black/30 flex items-center justify-center border-b md:border-b-0 md:border-r border-white/8">
                 <img
                   src={c.original_image_url}
                   alt="Input"
-                  className="w-full h-full object-cover max-h-36 sm:max-h-full"
+                  className="w-full h-48 md:h-full object-cover md:max-h-full"
                 />
               </div>
             )}
 
             {/* 2. 3D model viewer (Middle) */}
-            <div className="flex-1 min-h-[180px] bg-black/10 relative">
+            <div className="flex-1 h-64 md:h-auto md:min-h-[180px] bg-black/10 relative">
               {c.raw_glb_url || c.glb_model_url ? (
                 <model-viewer
                   src={c.raw_glb_url ?? c.glb_model_url}
                   auto-rotate="true"
                   camera-controls="true"
                   loading="lazy"
-                  style={{ width: "100%", height: "100%", minHeight: "180px", background: "transparent" }}
+                  style={{ width: "100%", height: "100%", background: "transparent" }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-xs text-tech-muted/50 font-mono">
@@ -106,7 +106,7 @@ export function WaitStateGallery() {
             </div>
 
             {/* 3. Review / Feedback Panel (Right) */}
-            <div className="w-full sm:w-64 shrink-0 p-4 border-t sm:border-t-0 sm:border-l border-white/8 bg-black/20 flex flex-col gap-2 font-mono">
+            <div className="w-full md:w-64 shrink-0 p-4 border-t md:border-t-0 md:border-l border-white/8 bg-black/20 flex flex-col gap-2 font-mono">
               <span className="text-[9px] text-white/40 uppercase tracking-widest font-bold block">Feedback</span>
               {c.reviews && c.reviews.length > 0 ? (
                 <div className="flex flex-col gap-1.5 min-w-0">
