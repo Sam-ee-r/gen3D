@@ -12,6 +12,7 @@ import {
   EyeOff,
   Trash2,
   Plus,
+  Minus,
   Stamp,
   Type,
   Image as ImageIcon,
@@ -309,23 +310,56 @@ function StudioSlider({
   max?: number;
   step?: number;
 }) {
+  const pct = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+  const stepDecimalPlaces = step.toString().split(".")[1]?.length || 0;
+
+  const handleDecrement = () => {
+    const nextVal = Math.max(min, value - step);
+    onChange(parseFloat(nextVal.toFixed(stepDecimalPlaces)));
+  };
+
+  const handleIncrement = () => {
+    const nextVal = Math.min(max, value + step);
+    onChange(parseFloat(nextVal.toFixed(stepDecimalPlaces)));
+  };
+
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5 animate-in fade-in duration-300">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-mono text-tech-muted uppercase tracking-widest">{label}</span>
         <span className="text-[10px] font-mono text-tech-fg tabular-nums">{value}</span>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        style={{ "--accent": accentColor } as React.CSSProperties}
-        className="studio-slider w-full h-5 bg-transparent appearance-none cursor-pointer outline-none"
-      />
-      <div className="flex items-center justify-between text-[9px] font-mono text-tech-muted/60">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleDecrement}
+          className="studio-stepper-btn cursor-pointer select-none"
+          title="Decrease"
+        >
+          <Minus className="w-2.5 h-2.5" />
+        </button>
+        
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          style={{ "--progress": `${pct}%`, "--accent": accentColor } as React.CSSProperties}
+          className="studio-slider flex-1 h-5 bg-transparent appearance-none cursor-pointer outline-none"
+        />
+        
+        <button
+          type="button"
+          onClick={handleIncrement}
+          className="studio-stepper-btn cursor-pointer select-none"
+          title="Increase"
+        >
+          <Plus className="w-2.5 h-2.5" />
+        </button>
+      </div>
+      <div className="flex items-center justify-between text-[9px] font-mono text-tech-muted/60 px-7">
         <span>{leftLabel}</span>
         <span>{rightLabel}</span>
       </div>
