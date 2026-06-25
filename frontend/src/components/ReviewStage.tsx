@@ -404,7 +404,31 @@ function ModelViewerPanel({
     };
   }, [viewerRef, startFadeOut]);
 
+  const exportFromViewer = async (defaultFilename: string) => {
+    const el = viewerRef.current;
+    if (!el) return false;
+    try {
+      if (typeof el.exportScene === "function") {
+        const blob = await el.exportScene({ binary: true });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const finalName = defaultFilename.endsWith('.glb') ? defaultFilename : defaultFilename.replace(/\.[^/.]+$/, "") + '.glb';
+        a.download = finalName;
+        a.click();
+        URL.revokeObjectURL(url);
+        return true;
+      }
+    } catch (e) {
+      console.error("Export failed", e);
+    }
+    return false;
+  };
+
   const handleDownload = async () => {
+    const exported = await exportFromViewer(filename);
+    if (exported) return;
+
     try {
       const res = await fetch(src);
       if (!res.ok) throw new Error("Download failed");
@@ -422,6 +446,11 @@ function ModelViewerPanel({
 
   const handleDownloadRefined = async () => {
     if (!refinedSrc) return;
+    const targetFilename = refinedFilename || filename;
+    
+    const exported = await exportFromViewer(targetFilename);
+    if (exported) return;
+
     try {
       const res = await fetch(refinedSrc);
       if (!res.ok) throw new Error("Download failed");
@@ -429,7 +458,7 @@ function ModelViewerPanel({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = refinedFilename;
+      a.download = targetFilename;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -814,29 +843,42 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
         opacity: isGhost ? Math.min(opacity, 0.5) : opacity,
         depthTest: true,
         depthWrite: false,
+        side: DoubleSide,
         polygonOffset: true,
         polygonOffsetFactor: -10,
         polygonOffsetUnits: -10,
       });
 
-      const depth = Math.max(w, h) * 2;
+      const depth = Math.max(w, h) * 0.1; // Reduced depth to prevent punching through meshes
       const size = new Vector3(w, h, depth);
       
-      const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
-      const decalGeom = new DecalGeometry(targetMesh, pos, orientation, size);
-      
-      // DecalGeometry is generated in world space. Inverse transform it so we can parent it directly to targetMesh.
-      decalGeom.applyMatrix4(targetMesh.matrixWorld.clone().invert());
-
       let mesh: any;
 
       if (isGhost) {
-        // Ghost sticker preview uses the same DecalGeometry so it perfectly matches the final placement
+        // Idea A: Flat plane preview for 60fps performance while hovering
+        const planeGeom = new PlaneGeometry(w, h);
+        
+        // Nudge slightly outward along the normal to avoid Z-fighting
+        dummy.position.add(nrm.clone().multiplyScalar(0.005));
+        dummy.updateMatrix();
+        
+        // Apply dummy's world transform
+        planeGeom.applyMatrix4(dummy.matrix);
+        
+        // Inverse transform to local space so it tracks correctly if targetMesh is animated
+        planeGeom.applyMatrix4(targetMesh.matrixWorld.clone().invert());
+
         mat.depthWrite = false;
-        mesh = new Mesh(decalGeom, mat);
+        mesh = new Mesh(planeGeom, mat);
         targetMesh.add(mesh);
       } else {
-        // High quality path for placed stickers: clone material and texture
+        // High quality path for placed stickers: perfectly wrap the geometry
+        const { DecalGeometry } = await import("three/examples/jsm/geometries/DecalGeometry.js");
+        const decalGeom = new DecalGeometry(targetMesh, pos, orientation, size);
+        
+        // DecalGeometry is generated in world space. Inverse transform it so we can parent it directly to targetMesh.
+        decalGeom.applyMatrix4(targetMesh.matrixWorld.clone().invert());
+
         const finalMat = mat.clone();
         if (texture.image) {
           const canvas = document.createElement("canvas");
