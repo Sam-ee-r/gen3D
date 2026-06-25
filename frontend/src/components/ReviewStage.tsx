@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
-import { Download, Grid3X3, AlertTriangle, Eye, Stamp, MessageSquare, Edit3 } from "lucide-react";
+import { Download, Grid3X3, AlertTriangle, Eye, Stamp, MessageSquare, Edit3, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialEditPanel } from "./MaterialEditPanel";
 import type { ActiveDecalConfig, ConfirmedDecal, DecalCallbacks } from "./MaterialEditPanel";
@@ -108,6 +108,7 @@ function ModelViewerPanel({
   const [isComparing, setIsComparing] = useState(false);
   const [transitionSnapshot, setTransitionSnapshot] = useState<string | null>(null);
   const [isFading, setIsFading] = useState(false);
+  const [showMobileInfo, setShowMobileInfo] = useState(false);
   const internalRef = useRef<ModelViewerElement | null>(null);
   const viewerRef = externalRef ?? internalRef;
 
@@ -549,23 +550,33 @@ function ModelViewerPanel({
 
             {/* Floating Metadata Badges */}
             {stats && (
-              <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none fade-in animate-in duration-500">
-                <div className="bg-tech-bg/80 backdrop-blur-md border border-tech-border rounded-lg px-3 py-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)] flex flex-col gap-1.5">
-                  <span className="text-[10px] text-tech-muted uppercase font-semibold tracking-wider">Mesh Metrics</span>
-                  <div className="flex items-center justify-between gap-6 text-xs font-mono">
-                    <span className="text-tech-fg">Faces</span>
-                    <span className="text-primary font-medium">{stats.faces}</span>
+              <>
+                {/* Mobile Info Toggle */}
+                <button
+                  onClick={() => setShowMobileInfo(!showMobileInfo)}
+                  className="sm:hidden absolute top-4 left-4 z-20 w-8 h-8 rounded-full bg-tech-bg/80 backdrop-blur-md border border-tech-border flex items-center justify-center text-tech-muted hover:text-tech-fg shadow-lg"
+                >
+                  <Info className="w-4 h-4" />
+                </button>
+
+                <div className={`absolute top-14 sm:top-4 left-4 z-10 flex-col gap-2 pointer-events-none fade-in animate-in duration-500 ${showMobileInfo ? 'flex' : 'hidden sm:flex'}`}>
+                  <div className="bg-tech-bg/80 backdrop-blur-md border border-tech-border rounded-lg px-3 py-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)] flex flex-col gap-1.5">
+                    <span className="text-[10px] text-tech-muted uppercase font-semibold tracking-wider">Mesh Metrics</span>
+                    <div className="flex items-center justify-between gap-6 text-xs font-mono">
+                      <span className="text-tech-fg">Faces</span>
+                      <span className="text-primary font-medium">{stats.faces}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-6 text-xs font-mono">
+                      <span className="text-tech-fg">Vertices</span>
+                      <span className="text-primary font-medium">{stats.vertices}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between gap-6 text-xs font-mono">
-                    <span className="text-tech-fg">Vertices</span>
-                    <span className="text-primary font-medium">{stats.vertices}</span>
+                  <div className="bg-tech-bg/80 backdrop-blur-md border border-tech-border rounded-lg px-3 py-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
+                    <span className="text-[10px] text-tech-muted uppercase font-semibold tracking-wider block mb-1">Geometry Trace</span>
+                    <span className="text-xs font-mono text-primary font-medium">{stats.type}</span>
                   </div>
                 </div>
-                <div className="bg-tech-bg/80 backdrop-blur-md border border-tech-border rounded-lg px-3 py-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
-                  <span className="text-[10px] text-tech-muted uppercase font-semibold tracking-wider block mb-1">Geometry Trace</span>
-                  <span className="text-xs font-mono text-primary font-medium">{stats.type}</span>
-                </div>
-              </div>
+              </>
             )}
 
 
