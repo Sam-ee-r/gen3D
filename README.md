@@ -1,3 +1,13 @@
+---
+title: Gen3D
+emoji: 🧊
+colorFrom: orange
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🧊 Photo-to-3D Pipeline
 
 An AI-powered multi-agent pipeline that takes a photo of any object and generates a refined 3D mesh from it — automatically.
