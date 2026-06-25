@@ -5,8 +5,9 @@ import { AppHeader } from "@/components/AppHeader";
 import { InputStage } from "@/components/InputStage";
 import { ProcessingStage } from "@/components/ProcessingStage";
 import { ReviewStage } from "@/components/ReviewStage";
+import { useAuth } from "@/hooks/useAuth";
 
-export const Route = createFileRoute("/")(({
+export const Route = createFileRoute("/")({
   component: Index,
   head: () => ({
     meta: [
@@ -16,13 +17,14 @@ export const Route = createFileRoute("/")(({
       { property: "og:description", content: "AI-powered 3D model generation and refinement workflow." },
     ],
   }),
-}));
+});
 
 type AppStage = "input" | "processing" | "review";
 
 function Index() {
-  const [stage, setStage] = useState<AppStage>("review");
-  const [jobId, setJobId] = useState<string | null>("test");
+  const { user } = useAuth();
+  const [stage, setStage] = useState<AppStage>("input");
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const handleGenerate = useCallback((id: string) => {
     setJobId(id);
@@ -31,6 +33,11 @@ function Index() {
 
   const handleProcessingComplete = useCallback(() => setStage("review"), []);
 
+  const handleSelectCreation = useCallback((id: string) => {
+    setJobId(id);
+    setStage("review");
+  }, []);
+
   const handleReset = useCallback(() => {
     setJobId(null);
     setStage("input");
@@ -38,7 +45,11 @@ function Index() {
 
   return (
     <div className="min-h-screen">
-      <AppHeader onReset={handleReset} showReset={stage !== "input"} />
+      <AppHeader
+        onReset={handleReset}
+        showReset={stage !== "input"}
+        onSelectCreation={handleSelectCreation}
+      />
       <main className="pt-12">
         <AnimatePresence mode="wait">
           {stage === "input" && (

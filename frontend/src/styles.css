@@ -236,3 +236,46 @@
   border-radius: 9999px;
 }
 
+/* Custom Tooltip and Feedback Glow Animations */
+@keyframes tooltip-fade-glow {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+    filter: drop-shadow(0 0 0 oklch(0.72 0.18 50 / 0));
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 0 12px oklch(0.72 0.18 50 / 0.6));
+  }
+  90% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 0 12px oklch(0.72 0.18 50 / 0.6));
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+    filter: drop-shadow(0 0 0 oklch(0.72 0.18 50 / 0));
+    visibility: hidden;
+  }
+}
+.animate-tooltip-glow {
+  animation: tooltip-fade-glow 5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes button-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 6px oklch(0.72 0.18 50 / 0.2), 0 0 12px oklch(0.72 0.18 50 / 0.1);
+    border-color: oklch(0.72 0.18 50 / 0.2);
+  }
+  50% {
+    box-shadow: 0 0 18px oklch(0.72 0.18 50 / 0.6), 0 0 30px oklch(0.72 0.18 50 / 0.3);
+    border-color: oklch(0.72 0.18 50 / 0.8);
+  }
+}
+.animate-button-glow {
+  animation: button-glow-pulse 2s ease-in-out infinite;
+}
+
+

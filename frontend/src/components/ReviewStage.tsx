@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
-import { Download, Grid3X3, AlertTriangle, Eye, Stamp } from "lucide-react";
+import { Download, Grid3X3, AlertTriangle, Eye, Stamp, MessageSquare, Edit3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialEditPanel } from "./MaterialEditPanel";
 import type { ActiveDecalConfig, ConfirmedDecal, DecalCallbacks } from "./MaterialEditPanel";
 // No need for Three.js Raycaster — we use model-viewer's public positionAndNormalFromPoint() API
 import type { ModelViewerElement, ModelViewerMaterial } from "../model-viewer.d.ts";
 import "../model-viewer.d.ts";
+import { useAuth } from "@/hooks/useAuth";
+import { ReviewAndDisplayForm } from "./ReviewAndDisplayForm";
+import { supabase } from "@/lib/supabase";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Local Error Boundary to prevent page-level crashes and credit loss
@@ -606,8 +609,96 @@ interface ReviewStageProps {
 }
 
 export function ReviewStage({ jobId }: ReviewStageProps) {
+  const { user } = useAuth();
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const viewerRef = useRef<ModelViewerElement | null>(null);
+
+  // ── Review Modal State ───────────────────────────────────────────────
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [hasDismissedReview, setHasDismissedReview] = useState(false);
+  const [showHighlightTip, setShowHighlightTip] = useState(false);
+  const [hasReviewed, setHasReviewed] = useState(false);
+
+  // ── Editable Object Name State ──────────────────────────────────────
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState("");
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    let active = true;
+
+    // Reset states
+    setShowReviewModal(false);
+    setHasDismissedReview(false);
+    setShowHighlightTip(false);
+    setHasReviewed(false);
+
+    // Check if review already exists in Supabase
+    supabase
+      .from("reviews")
+      .select("id")
+      .eq("creation_id", jobId)
+      .limit(1)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (!error && data && data.length > 0) {
+          setHasReviewed(true);
+          setHasDismissedReview(true); // show the floating button
+        } else {
+          setShowReviewModal(true); // pop up review modal automatically
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [jobId]);
+
+  const handleDismissReview = useCallback(() => {
+    setShowReviewModal(false);
+    setHasDismissedReview(true);
+    setShowHighlightTip(true);
+    setTimeout(() => {
+      setShowHighlightTip(false);
+    }, 5000);
+  }, []);
+
+  const handleCloseReview = useCallback(() => {
+    setShowReviewModal(false);
+    setHasDismissedReview(true); // Leave the feedback button visible
+    setHasReviewed(true); // Mark as reviewed
+  }, []);
+
+  const handleSaveName = async () => {
+    if (!tempName.trim()) return;
+    const cleanName = tempName.trim();
+    
+    // Update local state first
+    setJobStatus(prev => prev ? { ...prev, object_label: cleanName } : null);
+    setIsEditingName(false);
+
+    // Update in Supabase
+    try {
+      await supabase
+        .from("creations")
+        .update({ object_label: cleanName })
+        .eq("id", jobId);
+    } catch (err) {
+      console.error("Error updating object label in database:", err);
+    }
+
+    // Update in-memory job status on backend so that poll returns the updated label
+    try {
+      await fetch(`/api/rename/${jobId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: cleanName }),
+      });
+    } catch (err) {
+      console.error("Error updating label in backend memory:", err);
+    }
+  };
 
   // ── Decal Studio State (lifted from MaterialEditPanel to ReviewStage) ───────
   const [activeStudioTab, setActiveStudioTab] = useState<"colorChanger" | "meshSettings" | "decalPlacer">("colorChanger");
@@ -676,6 +767,13 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       const scene = getScene();
       if (!scene) return null;
 
+      // IMPORTANT: model-viewer's positionAndNormalFromPoint returns coordinates in MODEL space
+      // (independent of its auto-scaling/centering). DecalGeometry and Raycaster need WORLD space.
+      if (scene.target && scene.target.matrixWorld) {
+        pos.applyMatrix4(scene.target.matrixWorld);
+        nrm.transformDirection(scene.target.matrixWorld).normalize();
+      }
+
       // We need to find the specific Mesh that was clicked.
       const rayOrigin = pos.clone().add(nrm.clone().multiplyScalar(0.01));
       const rayDirection = nrm.clone().multiplyScalar(-1);
@@ -696,6 +794,11 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
       // Calculate orientation for the decal
       const dummy = new Object3D();
       dummy.position.copy(pos);
+      if (Math.abs(nrm.y) > 0.99) {
+        dummy.up.set(0, 0, 1);
+      } else {
+        dummy.up.set(0, 1, 0);
+      }
       dummy.lookAt(pos.clone().add(nrm));
       dummy.rotateZ((rotationDeg * Math.PI) / 180);
       const orientation = new Euler().copy(dummy.rotation);
@@ -1014,13 +1117,59 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
 
 
   return (
-    <div className="min-h-[calc(100vh-3rem)] pt-14 pb-4 px-6 md:px-8">
-      <div className="max-w-[1800px] mx-auto h-[calc(100vh-7.5rem)] flex flex-col gap-3">
+    <div className="min-h-[calc(100vh-3rem)] pt-0 pb-4 px-6 md:px-8">
+      <div className="max-w-[1800px] mx-auto h-[calc(100vh-5rem)] flex flex-col gap-3">
         {/* Header */}
         <div className="flex items-center justify-between shrink-0 mb-1">
           <div>
-            <h2 className="text-lg font-bold text-foreground">Generation Complete</h2>
-            <p className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <h2 className="text-lg font-bold text-foreground">Generation Complete:</h2>
+              {isEditingName ? (
+                <div className="flex items-center gap-1.5 mt-1 sm:mt-0">
+                  <input
+                    type="text"
+                    value={tempName}
+                    onChange={(e) => setTempName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveName();
+                      else if (e.key === "Escape") setIsEditingName(false);
+                    }}
+                    className="bg-black/60 border border-primary/30 rounded px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-primary/60 w-48"
+                    autoFocus
+                  />
+                  <Button
+                    onClick={handleSaveName}
+                    className="h-7 px-2.5 text-[10px] bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-mono"
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setIsEditingName(false)}
+                    className="h-7 px-2.5 text-[10px] text-tech-muted hover:text-white font-mono hover:bg-white/5"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 group">
+                  <span className="text-lg font-bold text-primary font-mono select-none">
+                    {jobStatus?.object_label || "Generated Model"}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setTempName(jobStatus?.object_label || "Generated Model");
+                      setIsEditingName(true);
+                    }}
+                    className="p-1 rounded hover:bg-white/5 text-tech-muted hover:text-white transition-colors"
+                    title="Rename Creation"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               Pipeline finished — 3D Reconstruction verified and refined.
             </p>
@@ -1067,11 +1216,10 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
                 subtitle="model_raw.glb • Textures & Mesh"
                 src={`/api/download-raw/${jobId}`}
                 refinedSrc={`/api/download/${jobId}`}
-                filename="model_raw.glb"
-                refinedFilename="model_refined.glb"
+                filename={jobStatus?.object_label ? `${jobStatus.object_label.toLowerCase().replace(/\s+/g, '_')}_raw.glb` : "model_raw.glb"}
+                refinedFilename={jobStatus?.object_label ? `${jobStatus.object_label.toLowerCase().replace(/\s+/g, '_')}_refined.glb` : "model_refined.glb"}
                 available={hasRaw}
                 refinedAvailable={hasRefined}
-                unavailableReason="Original textures missing."
                 accentColor="oklch(0.65 0.18 30 / 0.8)"
                 stats={{ faces: rawFaces, vertices: rawVertices, type: "PBR Asset" }}
                 viewerRef={viewerRef}
@@ -1090,7 +1238,45 @@ export function ReviewStage({ jobId }: ReviewStageProps) {
                   </div>
                 </div>
               )}
+
+              {/* Floating "Leave your feedback :D" button & tooltip */}
+              {(hasDismissedReview || hasReviewed) && (
+                <div className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-2 animate-in fade-in duration-300">
+                  {/* Glowing/fading tooltip (only if not reviewed yet) */}
+                  {showHighlightTip && !hasReviewed && (
+                    <div className="animate-tooltip-glow bg-primary/10 border border-primary/30 text-primary px-3.5 py-2 rounded-xl text-[10px] font-mono font-semibold shadow-lg select-none relative after:content-[''] after:absolute after:top-full after:right-6 after:border-4 after:border-transparent after:border-t-primary/30">
+                      please do consider leaving a review when you're done :)
+                    </div>
+                  )}
+                  
+                  {/* Floating button */}
+                  <button
+                    onClick={() => {
+                      setShowReviewModal(true);
+                      setShowHighlightTip(false);
+                    }}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[10px] font-mono font-bold transition-all shadow-lg ${
+                      showHighlightTip && !hasReviewed
+                        ? "bg-primary border border-primary/50 text-primary-foreground animate-button-glow scale-105" 
+                        : "bg-black/85 hover:bg-black border border-white/10 hover:border-primary/40 text-tech-fg shadow-black/50 hover:scale-105 active:scale-95"
+                    }`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-primary" />
+                    <span>Leave your feedback :D</span>
+                  </button>
+                </div>
+              )}
             </div>
+            
+            {/* Modal Overlay Review Form */}
+            {showReviewModal && (
+              <ReviewAndDisplayForm
+                creationId={jobId}
+                user={user}
+                onClose={handleCloseReview}
+                onDismiss={handleDismissReview}
+              />
+            )}
           </LocalErrorBoundary>
 
           {/* Panel 3: Material Studio */}

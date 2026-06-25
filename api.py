@@ -4,9 +4,10 @@ import uuid
 import threading
 import re
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 # SSL fix for macOS
 try:
@@ -17,6 +18,14 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 load_dotenv()
+
+supabase_url: str = os.environ.get("SUPABASE_URL")
+supabase_key: str = os.environ.get("SUPABASE_ANON_KEY")
+if supabase_url and supabase_key:
+    supabase: Client = create_client(supabase_url, supabase_key)
+else:
+    supabase = None
+
 
 app = FastAPI(title="Photo-to-3D API")
 
@@ -148,6 +157,40 @@ def run_pipeline(job_id: str, image_path: str, preprocess: bool = False):
                 except Exception as e:
                     print(f"Error calculating refined stats: {e}")
 
+            # Extract the object label from the director's output if available
+            object_label = "Generated Model"
+            try:
+                brief = str(analyze_task.output.raw)
+                from litellm import completion
+                resp = completion(
+                    model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a helper that extracts a 1-2 word descriptive label for an object from a text brief. Output only the label and nothing else (e.g. 'orange powerbank', 'laptop'). Keep it short and in lowercase.",
+                        },
+                        {"role": "user", "content": f"Extract the object label from this brief:\n{brief}"},
+                    ],
+                    temperature=0.0,
+                    max_tokens=10,
+                )
+                label_candidate = resp.choices[0].message.content.strip().replace("'", "").replace('"', '').strip()
+                if label_candidate and len(label_candidate) < 40 and not label_candidate.lower().startswith("here is"):
+                    object_label = label_candidate.title()
+            except Exception as e:
+                print(f"Error extracting object label via LLM: {e}")
+                try:
+                    import re
+                    match = re.search(
+                        r"(?:object\s+)?label\s*:\s*['\"#]?([a-zA-Z0-9\s_-]{2,30})",
+                        brief,
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        object_label = match.group(1).strip().title()
+                except Exception:
+                    pass
+
             job.update(
                 status="complete",
                 step="Complete!",
@@ -156,12 +199,65 @@ def run_pipeline(job_id: str, image_path: str, preprocess: bool = False):
                 raw_model_path=raw_path if raw_path and os.path.exists(raw_path) else None,
                 raw_stats=raw_stats,
                 refined_stats=refined_stats,
+                object_label=object_label,
             )
+
+            # Upload to Supabase and update creations row
+            if supabase:
+                try:
+                    
+                    with open(image_path, "rb") as f:
+                        supabase.storage.from_("inputs").upload(
+                            path=f"{job_id}.jpg",
+                            file=f.read(),
+                            file_options={"content-type": "image/jpeg"}
+                        )
+                    input_url = supabase.storage.from_("inputs").get_public_url(f"{job_id}.jpg")
+
+                    with open(refined_path, "rb") as f:
+                        supabase.storage.from_("models").upload(
+                            path=f"{job_id}_refined.glb",
+                            file=f.read(),
+                            file_options={"content-type": "model/gltf-binary"}
+                        )
+                    refined_url = supabase.storage.from_("models").get_public_url(f"{job_id}_refined.glb")
+
+                    raw_url = None
+                    if raw_path and os.path.exists(raw_path):
+                        with open(raw_path, "rb") as f:
+                            supabase.storage.from_("models").upload(
+                                path=f"{job_id}_raw.glb",
+                                file=f.read(),
+                                file_options={"content-type": "model/gltf-binary"}
+                            )
+                        raw_url = supabase.storage.from_("models").get_public_url(f"{job_id}_raw.glb")
+
+                    supabase.table("creations").update({
+                        "original_image_url": input_url,
+                        "glb_model_url": refined_url,
+                        "raw_glb_url": raw_url,
+                        "raw_faces": raw_stats["faces"],
+                        "raw_vertices": raw_stats["vertices"],
+                        "refined_faces": refined_stats["faces"],
+                        "refined_vertices": refined_stats["vertices"],
+                        "object_label": object_label,
+                        "status": "complete"
+                    }).eq("id", job_id).execute()
+                except Exception as e:
+                    print(f"Supabase update error: {e}")
+
         else:
             job.update(status="failed", error=f"Could not find .glb paths in result: {result_str[:300]}")
+            if supabase:
+                supabase.table("creations").update({"status": "failed"}).eq("id", job_id).execute()
 
     except Exception as e:
         job.update(status="failed", step="Error", error=str(e))
+        if supabase:
+            try:
+                supabase.table("creations").update({"status": "failed"}).eq("id", job_id).execute()
+            except Exception:
+                pass
 
 
 
@@ -172,7 +268,7 @@ def run_pipeline(job_id: str, image_path: str, preprocess: bool = False):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/generate-3d")
-async def generate_3d(file: UploadFile = File(...), preprocess: bool = Form(False)):
+async def generate_3d(file: UploadFile = File(...), preprocess: bool = Form(False), user_id: str = Form(None)):
     """Accept an image upload, start the pipeline, return a job_id."""
     job_id = str(uuid.uuid4())
 
@@ -192,7 +288,21 @@ async def generate_3d(file: UploadFile = File(...), preprocess: bool = Form(Fals
         "input_type": None,
         "input_value": None,
         "error": None,
+        "object_label": None,
     }
+
+    if supabase:
+        try:
+            insert_data = {
+                "id": job_id,
+                "status": "queued"
+            }
+            if user_id:
+                insert_data["user_id"] = user_id
+                
+            supabase.table("creations").insert(insert_data).execute()
+        except Exception as e:
+            print(f"Supabase insert error: {e}")
 
     thread = threading.Thread(target=run_pipeline, args=(job_id, image_path, preprocess), daemon=True)
     thread.start()
@@ -217,9 +327,39 @@ async def get_input_image(job_id: str):
 
 @app.get("/api/status/{job_id}")
 async def get_status(job_id: str):
-    """Poll the status of a running job."""
+    """Poll the status of a running job, falling back to Supabase if not in-memory."""
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+        if supabase:
+            try:
+                res = supabase.table("creations").select("*").eq("id", job_id).execute()
+                if res.data and len(res.data) > 0:
+                    row = res.data[0]
+                    jobs[job_id] = {
+                        "status": row.get("status", "complete"),
+                        "step": "Complete!" if row.get("status") == "complete" else "Failed",
+                        "progress": 100 if row.get("status") == "complete" else 0,
+                        "model_path": row.get("glb_model_url"),
+                        "raw_model_path": row.get("raw_glb_url"),
+                        "raw_stats": {
+                            "faces": row.get("raw_faces") or 0,
+                            "vertices": row.get("raw_vertices") or 0,
+                        },
+                        "refined_stats": {
+                            "faces": row.get("refined_faces") or 0,
+                            "vertices": row.get("refined_vertices") or 0,
+                        },
+                        "input_type": "image" if row.get("original_image_url") else None,
+                        "input_value": row.get("original_image_url"),
+                        "error": None,
+                        "object_label": row.get("object_label"),
+                    }
+                else:
+                    raise HTTPException(status_code=404, detail="Job not found")
+            except Exception as e:
+                print(f"Error loading job from Supabase: {e}")
+                raise HTTPException(status_code=404, detail="Job not found")
+        else:
+            raise HTTPException(status_code=404, detail="Job not found")
     return jobs[job_id]
 
 
@@ -227,6 +367,16 @@ async def get_status(job_id: str):
 async def download_model(job_id: str):
     """Stream the RANSAC-refined .glb file back to the browser."""
     if job_id not in jobs:
+        if supabase:
+            try:
+                res = supabase.table("creations").select("*").eq("id", job_id).execute()
+                if res.data and len(res.data) > 0:
+                    row = res.data[0]
+                    model_path = row.get("glb_model_url")
+                    if model_path:
+                        return RedirectResponse(url=model_path)
+            except Exception:
+                pass
         raise HTTPException(status_code=404, detail="Job not found")
 
     job = jobs[job_id]
@@ -234,6 +384,9 @@ async def download_model(job_id: str):
         raise HTTPException(status_code=400, detail="Model not ready yet")
 
     model_path = job["model_path"]
+    if model_path.startswith("http://") or model_path.startswith("https://"):
+        return RedirectResponse(url=model_path)
+
     if not os.path.exists(model_path):
         raise HTTPException(status_code=404, detail="Model file missing on disk")
 
@@ -249,6 +402,16 @@ async def download_model(job_id: str):
 async def download_raw_model(job_id: str):
     """Stream the original colored raw .glb file back to the browser."""
     if job_id not in jobs:
+        if supabase:
+            try:
+                res = supabase.table("creations").select("*").eq("id", job_id).execute()
+                if res.data and len(res.data) > 0:
+                    row = res.data[0]
+                    raw_path = row.get("raw_glb_url")
+                    if raw_path:
+                        return RedirectResponse(url=raw_path)
+            except Exception:
+                pass
         raise HTTPException(status_code=404, detail="Job not found")
 
     job = jobs[job_id]
@@ -256,7 +419,13 @@ async def download_raw_model(job_id: str):
         raise HTTPException(status_code=400, detail="Model not ready yet")
 
     raw_path = job.get("raw_model_path")
-    if not raw_path or not os.path.exists(raw_path):
+    if not raw_path:
+        raise HTTPException(status_code=404, detail="Raw model file not available")
+
+    if raw_path.startswith("http://") or raw_path.startswith("https://"):
+        return RedirectResponse(url=raw_path)
+
+    if not os.path.exists(raw_path):
         raise HTTPException(status_code=404, detail="Raw model file not available")
 
     return FileResponse(
@@ -265,6 +434,18 @@ async def download_raw_model(job_id: str):
         filename="model_raw.glb",
         headers={"Access-Control-Allow-Origin": "*"},
     )
+
+
+@app.post("/api/rename/{job_id}")
+async def rename_job(job_id: str, payload: dict):
+    """Rename the object label in-memory for a job."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    name = payload.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    jobs[job_id]["object_label"] = name.strip()
+    return {"status": "success"}
 
 
 if __name__ == "__main__":
