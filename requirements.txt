@@ -9,3 +9,5 @@ trimesh>=4.0.0
 scipy>=1.10.0
 numpy>=1.20.0
 open3d>=0.17.0
+rembg>=2.0.50
+Pillow>=10.0.0
