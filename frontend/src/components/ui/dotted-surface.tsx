@@ -124,7 +124,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     <div
       ref={containerRef}
       className={cn('pointer-events-none fixed inset-0', className)}
-      style={{ zIndex: -1 }}
+      style={{ zIndex: -1, backgroundColor: 'var(--background)' }}
       {...props}
     />
   );
