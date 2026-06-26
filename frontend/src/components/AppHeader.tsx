@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { Box, RotateCcw, User, ChevronDown, Linkedin, Github, Info } from "lucide-react";
+import { Box, RotateCcw, User, ChevronDown, Linkedin, Github, Info, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { ProfilePanel } from "@/components/ProfilePanel";
 import { AuthModal } from "@/components/AuthModal";
+import { Link } from "@tanstack/react-router";
 
 interface AppHeaderProps {
   onReset: () => void;
@@ -34,15 +35,24 @@ export function AppHeader({ onReset, showReset, onSelectCreation }: AppHeaderPro
       <header className="fixed top-0 left-0 right-0 z-50 bg-background/60 backdrop-blur-xl border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.5)] font-mono">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
           {/* Logo Brand */}
-          <div className="flex items-center gap-2">
+          <Link to="/" className="flex items-center gap-2">
             <img src="https://mxjkjeforjlgotvdmibm.supabase.co/storage/v1/object/public/inputs/logo.png" alt="Polyfy Logo" className="h-7 w-auto object-contain" />
             <span className="text-base sm:text-lg font-bold tracking-tight text-foreground font-display select-none">
               Polyfy
             </span>
-          </div>
+          </Link>
 
           {/* Right Navigation controls */}
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* Gallery Link */}
+            <Link 
+              to="/gallery"
+              className="flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border border-transparent hover:border-white/5 hover:bg-white/5 text-xs text-muted-foreground hover:text-foreground transition-all duration-200"
+            >
+              <Images className="w-4 h-4 sm:hidden" />
+              <span className="hidden sm:inline">Gallery</span>
+            </Link>
+
             {/* About the Developer Dropdown */}
             <div className="relative" ref={dropdownRef}>
               <button

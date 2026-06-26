@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Upload, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -15,6 +15,17 @@ export function InputStage({ onGenerate }: InputStageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Warm up backend when this component mounts
+  useEffect(() => {
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    fetch(`${apiBase}/api/health`)
+      .then((res) => {
+        if (!res.ok) console.warn("Backend warmup ping failed");
+        else console.log("Backend warmed up successfully");
+      })
+      .catch((err) => console.warn("Failed to warm up backend on load:", err));
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -41,7 +52,8 @@ export function InputStage({ onGenerate }: InputStageProps) {
       return;
     }
     setIsLoading(true);
-    try {
+
+    const sendRequest = async (retriesLeft: number): Promise<any> => {
       const formData = new FormData();
       formData.append("file", selectedFile);
       formData.append("preprocess", "false");
@@ -50,14 +62,28 @@ export function InputStage({ onGenerate }: InputStageProps) {
       }
       const apiBase = import.meta.env.VITE_API_URL || "";
       const res = await fetch(`${apiBase}/api/generate-3d`, { method: "POST", body: formData });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const { job_id } = await res.json();
+      
+      if (!res.ok) {
+        // If it is a 502 Bad Gateway or 504 Gateway Timeout, retry after a short delay
+        if ((res.status === 502 || res.status === 504) && retriesLeft > 0) {
+          console.warn(`Gateway error ${res.status} encountered. Retrying in 2 seconds...`);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return sendRequest(retriesLeft - 1);
+        }
+        throw new Error(`Server error: ${res.status}`);
+      }
+      return res.json();
+    };
+
+    try {
+      const { job_id } = await sendRequest(2); // Retry up to 2 times
       onGenerate(job_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to start generation.");
       setIsLoading(false);
     }
   };
+
 
   return (
     <div className="min-h-[calc(100vh-3rem)] flex flex-col items-center justify-center px-4 py-6 md:px-8 md:py-12">

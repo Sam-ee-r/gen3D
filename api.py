@@ -455,6 +455,13 @@ async def rename_job(job_id: str, payload: dict):
     return {"status": "success"}
 
 
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint to warm up the backend and monitor status."""
+    return {"status": "healthy"}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
