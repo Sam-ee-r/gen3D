@@ -99,56 +99,91 @@ export function CommunityGallery() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="flex flex-col gap-4">
             {creations.map((c) => {
               const avgRating = getAverageRating(c.reviews);
               return (
-                <Card 
-                  key={c.id} 
-                  className="group cursor-pointer overflow-hidden bg-white/3 border-white/10 hover:border-primary/40 hover:shadow-[0_0_20px_rgba(var(--primary-rgb),0.15)] transition-all duration-300"
+                <div
+                  key={c.id}
                   onClick={() => setSelectedCreation(c)}
+                  className="flex flex-col md:flex-row bg-white/3 border border-white/8 rounded-2xl overflow-hidden hover:border-primary/40 hover:shadow-[0_0_20px_rgba(var(--primary-rgb),0.15)] transition-all duration-300 cursor-pointer group relative"
                 >
-                  <div className="relative aspect-square bg-black/40 border-b border-white/5 overflow-hidden">
-                    {c.original_image_url ? (
-                      <img 
-                        src={c.original_image_url} 
-                        alt={c.object_label || "Creation"} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                  {/* 1. Input image (Left) */}
+                  {c.original_image_url && (
+                    <div className="w-full md:w-48 shrink-0 bg-black/30 flex items-center justify-center border-b md:border-b-0 md:border-r border-white/8">
+                      <img
+                        src={c.original_image_url}
+                        alt="Input"
+                        className="w-full h-48 md:h-full object-cover md:max-h-full group-hover:scale-105 transition-transform duration-700 ease-out"
+                      />
+                    </div>
+                  )}
+
+                  {/* 2. 3D model viewer (Middle) */}
+                  <div className="w-full h-64 md:flex-1 md:h-auto md:min-h-[220px] bg-black/10 relative">
+                    {c.raw_glb_url || c.glb_model_url ? (
+                      <model-viewer
+                        src={c.raw_glb_url ?? c.glb_model_url}
+                        auto-rotate="true"
+                        camera-controls="true"
+                        loading="lazy"
+                        style={{ width: "100%", height: "100%", background: "transparent" }}
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Box className="w-10 h-10 text-white/20" />
+                      <div className="w-full h-full flex items-center justify-center text-xs text-tech-muted/50 font-mono">
+                        Model not available
                       </div>
                     )}
+
+                    {/* Label & Date overlay */}
+                    <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg flex flex-col gap-0.5">
+                      <span className="text-sm font-bold font-mono text-white">{c.object_label || "Untitled Model"}</span>
+                      <span className="text-[10px] font-mono text-tech-muted">{new Date(c.created_at || "").toLocaleDateString()}</span>
+                    </div>
                     
-                    {/* Hover overlay indicator */}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                      <div className="bg-primary/90 text-primary-foreground px-4 py-2 rounded-full font-mono text-sm font-semibold flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
-                        <Box className="w-4 h-4" /> View 3D Model
-                      </div>
+                    {/* Hover indicator overlay */}
+                    <div className="absolute inset-0 pointer-events-none bg-black/0 group-hover:bg-black/10 transition-colors duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                       <div className="bg-primary/90 text-primary-foreground px-4 py-2 rounded-full font-mono text-sm font-semibold flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 shadow-xl">
+                          <Box className="w-4 h-4" /> View Full Details
+                       </div>
                     </div>
                   </div>
-                  
-                  <div className="p-4 flex flex-col gap-2">
-                    <h3 className="font-mono font-semibold text-tech-fg truncate">
-                      {c.object_label || "Untitled Model"}
-                    </h3>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-1.5 text-tech-muted text-[10px] font-mono">
-                        <Calendar className="w-3 h-3" />
-                        {new Date(c.created_at || "").toLocaleDateString()}
-                      </div>
-                      
-                      {c.reviews && c.reviews.length > 0 && (
-                        <div className="flex items-center gap-1 text-yellow-400">
-                          <Star className="w-3.5 h-3.5 fill-current" />
-                          <span className="text-[11px] font-bold font-mono">{avgRating.toFixed(1)}</span>
-                          <span className="text-white/30 text-[10px] font-mono">({c.reviews.length})</span>
+
+                  {/* 3. Review / Feedback Panel (Right) */}
+                  <div className="w-full md:w-72 shrink-0 p-5 border-t md:border-t-0 md:border-l border-white/8 bg-black/20 flex flex-col gap-3 font-mono">
+                    <span className="text-[10px] text-white/40 uppercase tracking-widest font-bold block">Creator Review</span>
+                    {c.reviews && c.reviews.length > 0 ? (
+                      <div className="flex flex-col gap-2 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-white text-sm font-semibold truncate">
+                            {c.reviews[0].reviewer_name || "Anonymous"}
+                          </span>
+                          <div className="flex items-center gap-0.5 shrink-0 text-yellow-400">
+                            {Array.from({ length: 5 }).map((_, i) => (
+                              <Star
+                                key={i}
+                                className={`w-3.5 h-3.5 ${
+                                  i < (c.reviews?.[0]?.rating ?? 0)
+                                    ? "fill-current"
+                                    : "text-white/10"
+                                }`}
+                              />
+                            ))}
+                          </div>
                         </div>
-                      )}
-                    </div>
+                        {c.reviews[0].comment ? (
+                          <p className="text-white/70 italic text-xs leading-relaxed break-words line-clamp-6">
+                            "{c.reviews[0].comment}"
+                          </p>
+                        ) : (
+                          <p className="text-white/30 italic text-[11px]">Rated without comment</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-tech-muted italic text-xs mt-1">No feedback left yet.</span>
+                    )}
                   </div>
-                </Card>
+                </div>
               );
             })}
           </div>
@@ -192,7 +227,7 @@ export function CommunityGallery() {
             {/* 3D Viewer Area */}
             <div className="w-full md:w-2/3 h-[40vh] md:h-[80vh] bg-black/30 relative border-b md:border-b-0 md:border-r border-white/10">
                <model-viewer
-                  src={selectedCreation.glb_model_url ?? selectedCreation.raw_glb_url}
+                  src={selectedCreation.raw_glb_url ?? selectedCreation.glb_model_url}
                   auto-rotate="true"
                   camera-controls="true"
                   loading="eager"

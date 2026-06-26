@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { AlertTriangle, CheckCircle, XCircle, Loader2, ShieldAlert, ToggleLeft, ToggleRight, Star, ArrowUp, ArrowDown, Plus } from "lucide-react";
+import { AlertTriangle, CheckCircle, XCircle, Loader2, ShieldAlert, ToggleLeft, ToggleRight, Star, ArrowUp, ArrowDown, Plus, Pencil, Check, X, Maximize2, Calendar, Box, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { Creation, SystemStatus, Review } from "@/lib/supabase";
 
@@ -18,6 +18,13 @@ export function AdminCurationDashboard() {
   const [approvedCount, setApprovedCount] = useState(0);
   const [limitWarning, setLimitWarning] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  // Edit Name State
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState("");
+
+  // Modal View State
+  const [selectedCreation, setSelectedCreation] = useState<CreationWithReviews | null>(null);
 
   // Tab control: "curation" | "users"
   const [activeTab, setActiveTab] = useState<"curation" | "users">("curation");
@@ -217,6 +224,19 @@ export function AdminCurationDashboard() {
     await fetchData();
   };
 
+  const handleSaveName = async (id: string) => {
+    if (!editNameValue.trim()) return;
+    setUpdatingId(id);
+    try {
+      await supabase.from("creations").update({ object_label: editNameValue.trim() }).eq("id", id);
+      setEditingNameId(null);
+      await fetchData();
+    } catch (err) {
+      console.error("Error saving name:", err);
+    }
+    setUpdatingId(null);
+  };
+
   const toggleTokenExhausted = async () => {
     if (!systemStatus) return;
     const newVal = !systemStatus.api_token_exhausted;
@@ -345,15 +365,24 @@ export function AdminCurationDashboard() {
                       {c.original_image_url && (
                         <img src={c.original_image_url} alt="Input" className="w-1/2 object-cover border-r border-white/8" />
                       )}
-                      <div className="flex-1 bg-black/20 flex items-center justify-center">
+                      <div className="flex-1 bg-black/20 flex items-center justify-center relative group">
                         {c.raw_glb_url || c.glb_model_url ? (
-                          <model-viewer
-                            src={c.raw_glb_url ?? c.glb_model_url}
-                            auto-rotate="true"
-                            camera-controls="true"
-                            loading="lazy"
-                            style={{ width: "100%", height: "100%", background: "transparent" }}
-                          />
+                          <>
+                            <model-viewer
+                              src={c.raw_glb_url ?? c.glb_model_url}
+                              auto-rotate="true"
+                              camera-controls="true"
+                              loading="lazy"
+                              style={{ width: "100%", height: "100%", background: "transparent" }}
+                            />
+                            <button
+                              onClick={() => setSelectedCreation(c)}
+                              className="absolute top-2 right-2 bg-black/50 hover:bg-primary/80 text-white p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all z-10"
+                              title="Open Full Viewer"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
                         ) : (
                           <span className="text-[10px] text-tech-muted/50 font-mono">No model</span>
                         )}
@@ -395,10 +424,40 @@ export function AdminCurationDashboard() {
                       )}
                     </div>
 
-                    {/* Info + Toggle */}
+                    {/* Info + Actions */}
                     <div className="p-3 flex items-center justify-between gap-2 border-t border-white/5">
-                      <div className="min-w-0">
-                        <p className="text-xs font-mono font-semibold text-tech-fg truncate">{c.object_label ?? "Untitled"}</p>
+                      <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                        {editingNameId === c.id ? (
+                          <div className="flex items-center gap-1 w-full">
+                            <input
+                              type="text"
+                              value={editNameValue}
+                              onChange={(e) => setEditNameValue(e.target.value)}
+                              className="w-full bg-black/30 border border-white/10 rounded px-1.5 py-0.5 text-xs font-mono text-tech-fg focus:outline-none focus:border-primary"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveName(c.id);
+                                if (e.key === "Escape") setEditingNameId(null);
+                              }}
+                            />
+                            <button onClick={() => handleSaveName(c.id)} className="text-green-400 hover:text-green-300 shrink-0">
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => setEditingNameId(null)} className="text-red-400 hover:text-red-300 shrink-0">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 w-full group">
+                            <p className="text-xs font-mono font-semibold text-tech-fg truncate">{c.object_label ?? "Untitled"}</p>
+                            <button 
+                              onClick={() => { setEditingNameId(c.id); setEditNameValue(c.object_label || ""); }}
+                              className="text-tech-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                         <p className="text-[9px] text-tech-muted font-mono">{new Date(c.created_at).toLocaleString()}</p>
                       </div>
                       <button
@@ -664,6 +723,99 @@ export function AdminCurationDashboard() {
               </form>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {selectedCreation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div 
+            className="absolute inset-0" 
+            onClick={() => setSelectedCreation(null)} 
+          />
+          <div className="relative w-full max-w-5xl max-h-full bg-tech-bg border border-white/10 rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden animate-in zoom-in-95 duration-300">
+            
+            {/* Close button */}
+            <button 
+              onClick={() => setSelectedCreation(null)}
+              className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 text-white hover:bg-white/20 backdrop-blur-sm transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* 3D Viewer Area */}
+            <div className="w-full md:w-2/3 h-[40vh] md:h-[80vh] bg-black/30 relative border-b md:border-b-0 md:border-r border-white/10">
+               <model-viewer
+                  src={selectedCreation.raw_glb_url ?? selectedCreation.glb_model_url}
+                  auto-rotate="true"
+                  camera-controls="true"
+                  loading="eager"
+                  style={{ width: "100%", height: "100%", background: "transparent" }}
+                />
+            </div>
+
+            {/* Details & Reviews Area */}
+            <div className="w-full md:w-1/3 h-[50vh] md:h-[80vh] flex flex-col bg-tech-bg overflow-y-auto">
+              <div className="p-6 border-b border-white/10">
+                <h2 className="text-xl font-bold text-tech-fg font-mono mb-2">
+                  {selectedCreation.object_label || "Untitled Model"}
+                </h2>
+                <div className="flex flex-col gap-2 text-xs text-tech-muted font-mono">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 opacity-50" />
+                    <span>Created on {new Date(selectedCreation.created_at || "").toLocaleDateString()}</span>
+                  </div>
+                  {(selectedCreation.refined_vertices || selectedCreation.raw_vertices) && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <Box className="w-4 h-4 opacity-50" />
+                      <span>{selectedCreation.refined_vertices || selectedCreation.raw_vertices} Vertices</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-6 flex-1">
+                <h3 className="text-sm font-semibold text-white/80 font-mono tracking-wider uppercase mb-4">
+                  Community Feedback
+                </h3>
+                
+                {selectedCreation.reviews && selectedCreation.reviews.length > 0 ? (
+                  <div className="flex flex-col gap-4">
+                    {selectedCreation.reviews.map((review) => (
+                      <div key={review.id} className="bg-white/5 p-4 rounded-xl border border-white/5">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-tech-fg">
+                            <User className="w-3.5 h-3.5 opacity-50" />
+                            {review.reviewer_name || "Anonymous"}
+                          </div>
+                          <div className="flex items-center gap-0.5 text-yellow-400">
+                            {Array.from({ length: 5 }).map((_, i) => (
+                              <Star
+                                key={i}
+                                className={`w-3 h-3 ${
+                                  i < (review.rating ?? 0) ? "fill-current" : "text-white/10"
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        {review.comment && (
+                          <p className="text-xs text-tech-muted leading-relaxed mt-2 italic">
+                            "{review.comment}"
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-10 opacity-50">
+                    <Star className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                    <p className="text-xs font-mono">No reviews yet.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
