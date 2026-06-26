@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle, XCircle, Loader2, ShieldAlert, ToggleLeft, 
 import { supabase } from "@/lib/supabase";
 import type { Creation, SystemStatus, Review } from "@/lib/supabase";
 
-const MAX_GALLERY_ITEMS = 5;
+const MAX_GALLERY_ITEMS = 100;
 
 interface CreationWithReviews extends Creation {
   reviews?: Review[];
