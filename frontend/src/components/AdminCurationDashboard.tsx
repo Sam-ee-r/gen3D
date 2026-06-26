@@ -507,7 +507,7 @@ export function AdminCurationDashboard() {
                 </span>
               </div>
               <p className="text-[9px] text-tech-muted leading-normal mb-4 font-mono">
-                Top-to-bottom layout of items displayed in wait page gallery. Click arrows to arrange.
+                Custom layout order of items displayed in the Community Gallery (Featured) and wait page gallery. Click arrows to arrange.
               </p>
 
               {approvedCreations.length === 0 ? (
