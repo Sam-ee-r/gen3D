@@ -7,7 +7,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from supabase import create_client, Client
+import httpx
+from supabase import create_client, Client, ClientOptions
 
 # SSL fix for macOS
 try:
@@ -22,7 +23,9 @@ load_dotenv()
 supabase_url: str = os.environ.get("SUPABASE_URL")
 supabase_key: str = os.environ.get("SUPABASE_ANON_KEY")
 if supabase_url and supabase_key:
-    supabase: Client = create_client(supabase_url, supabase_key)
+    # Disable HTTP/2 to prevent httpx ConnectionTerminated protocol errors on idle timeout reuse
+    options = ClientOptions(httpx_client=httpx.Client(http2=False))
+    supabase: Client = create_client(supabase_url, supabase_key, options=options)
 else:
     supabase = None
 
